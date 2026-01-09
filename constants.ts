@@ -15,10 +15,10 @@ export const UNEMPLOYMENT_START_MONTH = 18; // Default scenario: Unemployed afte
 
 // Default Initial Data
 export const DEFAULT_EXPENSES = [
-  { id: '1', name: 'Groceries', category: 'MANDATORY', amount: 4000000, annualIncreasePercent: 5 },
+  { id: '1', name: 'Groceries', category: 'MANDATORY', amount: 4000000, annualIncreasePercent: 4 },
   { id: '2', name: 'Utilities', category: 'MANDATORY', amount: 1500000, annualIncreasePercent: 3 },
-  { id: '3', name: 'Transport', category: 'MANDATORY', amount: 1000000, annualIncreasePercent: 2 },
-  { id: '4', name: 'Entertainment', category: 'DISCRETIONARY', amount: 2000000, annualIncreasePercent: 0 },
+  { id: '3', name: 'Transport', category: 'MANDATORY', amount: 1000000, annualIncreasePercent: 3 },
+  { id: '4', name: 'Entertainment', category: 'DISCRETIONARY', amount: 2000000, annualIncreasePercent: 2 },
 ];
 
 export const DEFAULT_INCOME = {
@@ -36,4 +36,8 @@ export const DEFAULT_MORTGAGE = {
   penaltyPercent: 1.0,
   extraPaymentMinMultiple: 6,
   useDeposito: true
+};
+
+export const DEFAULT_MACRO = {
+  inflationRate: 4.0 // 4% Annual Inflation
 };

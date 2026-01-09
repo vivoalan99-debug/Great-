@@ -12,30 +12,41 @@ export const InterestSavedChart = () => {
   
   if (!simulationResult) return null;
   
-  const { yearLogs } = simulationResult;
+  const { yearLogs, logs } = simulationResult;
+  if (!logs || logs.length === 0) return null;
   
-  // Calculate Cumulative Data for visualization
+  // Determine year range from simulation logs to ensure full coverage (no gaps in X-axis)
+  const startYear = logs[0].year;
+  const endYear = logs[logs.length - 1].year;
+  
   let runningTotal = 0;
-  const chartData = yearLogs.map(log => {
-      runningTotal += log.interestSaved;
-      return {
-          ...log,
-          displayYear: 2026 + log.year,
+  const chartData = [];
+
+  for (let year = startYear; year <= endYear; year++) {
+      const yearIdx = year - startYear;
+      // Find log for this year index
+      const log = yearLogs.find(l => l.year === yearIdx);
+      const saved = log ? log.interestSaved : 0;
+      runningTotal += saved;
+
+      chartData.push({
+          displayYear: year,
+          interestSaved: saved,
           cumulativeSaved: runningTotal
-      };
-  });
+      });
+  }
 
   const totalSaved = runningTotal;
 
   return (
-    <Card title="Mortgage Interest Saved Analysis" className="flex flex-col h-[400px]">
+    <Card title="Interest Savings Projection" className="flex flex-col h-[400px]">
       <div className="flex justify-between items-end mb-4">
           <div>
-              <p className="text-sm text-slate-500">Cumulative Interest Saved</p>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Interest Saved</p>
               <p className="text-2xl font-bold text-emerald-600">{formatMoney(totalSaved)}</p>
           </div>
-          {chartData.length === 0 && (
-             <p className="text-xs text-slate-400 italic">No extra payments triggered yet.</p>
+          {totalSaved === 0 && (
+             <p className="text-xs text-slate-400 italic">No savings events triggered yet.</p>
           )}
       </div>
       
@@ -85,7 +96,7 @@ export const InterestSavedChart = () => {
                 barSize={30}
             >
                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fillOpacity={0.8} />
+                    <Cell key={`cell-${index}`} fillOpacity={entry.interestSaved > 0 ? 0.8 : 0} />
                  ))}
             </Bar>
             <Line 
@@ -95,7 +106,8 @@ export const InterestSavedChart = () => {
                 name="Cumulative Saved" 
                 stroke="#059669" 
                 strokeWidth={3}
-                dot={{ r: 4, fill: '#059669', strokeWidth: 0 }}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0 }}
             />
           </ComposedChart>
         </ResponsiveContainer>

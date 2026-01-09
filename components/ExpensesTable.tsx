@@ -4,7 +4,7 @@ import { formatMoney } from '../services/mathUtils';
 import { Trash2, Plus } from 'lucide-react';
 
 export const ExpensesTable: React.FC = () => {
-  const { expenses, setExpenses, updateExpense } = useStore();
+  const { expenses, setExpenses, updateExpense, macro } = useStore();
 
   const handleAmountChange = (id: string, val: string) => {
     const num = parseInt(val.replace(/\D/g, ''), 10) || 0;
@@ -18,7 +18,7 @@ export const ExpensesTable: React.FC = () => {
         name: 'New Expense', 
         category: 'DISCRETIONARY', 
         amount: 1000000, 
-        annualIncreasePercent: 3 
+        annualIncreasePercent: macro.inflationRate 
     }]);
   };
 
@@ -36,7 +36,7 @@ export const ExpensesTable: React.FC = () => {
             <th className="px-4 py-3">Expense Name</th>
             <th className="px-4 py-3">Category</th>
             <th className="px-4 py-3 text-right">Monthly (IDR)</th>
-            <th className="px-4 py-3 text-right">Inc. %</th>
+            <th className="px-4 py-3 text-right cursor-help" title="Specific increase rate. Uses Global Inflation if higher.">Min Inc. %</th>
             <th className="px-4 py-3 w-10"></th>
           </tr>
         </thead>
@@ -70,7 +70,7 @@ export const ExpensesTable: React.FC = () => {
               <td className="px-4 py-2 text-right">
                 <input 
                   type="number"
-                  className="bg-transparent text-right w-12 focus:outline-none focus:border-b focus:border-blue-500"
+                  className={`bg-transparent text-right w-12 focus:outline-none focus:border-b focus:border-blue-500 ${item.annualIncreasePercent < macro.inflationRate ? 'text-slate-400' : 'text-slate-700'}`}
                   value={item.annualIncreasePercent}
                   onChange={(e) => updateExpense(item.id, { annualIncreasePercent: parseFloat(e.target.value) })}
                 />
@@ -88,7 +88,7 @@ export const ExpensesTable: React.FC = () => {
           <tr className="bg-slate-50 font-semibold text-slate-700">
             <td className="px-4 py-3" colSpan={2}>Total Monthly Expenses</td>
             <td className="px-4 py-3 text-right text-blue-700">{formatMoney(totalMonthly)}</td>
-            <td colSpan={2}></td>
+            <td colSpan={2} className="text-xs text-slate-400 font-normal px-4">Global: {macro.inflationRate}%</td>
           </tr>
         </tbody>
       </table>

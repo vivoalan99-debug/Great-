@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from './store/useStore';
 import { 
   LayoutDashboard, Wallet, Home, PieChart, 
-  Settings, Menu, X, AlertTriangle, CheckCircle 
+  Settings, Menu, X, AlertTriangle, CheckCircle,
+  ShieldAlert, ShieldCheck, PiggyBank, TrendingUp
 } from 'lucide-react';
 import { ExpensesTable } from './components/ExpensesTable';
 import { CashflowChart, MortgageChart } from './components/Charts';
 import { DepositoGrowthChart } from './components/DepositoGrowthChart';
 import { InterestSavedChart } from './components/InterestSavedChart';
+import { MortgageAmortizationChart } from './components/MortgageAmortizationChart';
 import { Card, SummaryCard } from './components/ui/Card';
 import { formatMoney } from './services/mathUtils';
 import { ScenarioType } from './types';
@@ -25,7 +27,12 @@ const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: any) => 
 );
 
 export default function App() {
-  const { run, simulationResult, scenario, setScenario, income, setIncome, mortgage, setMortgage } = useStore();
+  const { 
+      run, simulationResult, scenario, setScenario, 
+      income, setIncome, mortgage, setMortgage,
+      macro, setMacro 
+  } = useStore();
+  
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   
@@ -36,6 +43,34 @@ export default function App() {
   if (!simulationResult) return <div className="min-h-screen flex items-center justify-center text-slate-400">Initializing Engine...</div>;
 
   const { summary, logs } = simulationResult;
+
+  const getRiskConfig = (level: 'LOW' | 'MEDIUM' | 'HIGH') => {
+      switch(level) {
+          case 'HIGH': return { 
+              color: 'red' as const, 
+              icon: ShieldAlert, 
+              bg: 'bg-rose-50', 
+              text: 'text-rose-700', 
+              border: 'border-rose-200 ring-2 ring-rose-50'
+          };
+          case 'MEDIUM': return { 
+              color: 'amber' as const, 
+              icon: AlertTriangle, 
+              bg: 'bg-amber-50', 
+              text: 'text-amber-700',
+              border: 'border-amber-200 ring-2 ring-amber-50'
+          };
+          default: return { 
+              color: 'green' as const, 
+              icon: ShieldCheck, 
+              bg: 'bg-emerald-50', 
+              text: 'text-emerald-700',
+              border: 'border-slate-100'
+          };
+      }
+  };
+  
+  const riskConfig = getRiskConfig(summary.riskLevel);
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -77,7 +112,11 @@ export default function App() {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
             <h1 className="text-xl font-bold text-slate-800 capitalize">{activeTab}</h1>
             <div className="flex items-center gap-4">
-               <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold uppercase">
+               <div 
+                 title={`Assessment: ${summary.riskReason}`}
+                 className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase transition-colors cursor-help ${riskConfig.bg} ${riskConfig.text}`}
+               >
+                  <riskConfig.icon size={14} />
                   {summary.riskLevel} Risk
                </div>
             </div>
@@ -92,24 +131,31 @@ export default function App() {
                 <SummaryCard 
                   label="Liquidity Runway" 
                   value={`${summary.liquidityRunwayMonths.toFixed(1)} Mo`} 
-                  subtext="Survival without income"
-                  color={summary.liquidityRunwayMonths < 6 ? 'red' : 'green'}
+                  subtext={`Min: ${summary.lowestLiquidityMonths.toFixed(1)} Mo`}
+                  color={riskConfig.color}
+                  icon={riskConfig.icon}
+                  className={riskConfig.border}
                 />
                 <SummaryCard 
                   label="Buffer Full" 
                   value={summary.monthsToFullBuffer ? `Month ${summary.monthsToFullBuffer}` : 'Never'} 
                   subtext="3x Expenses + Mortgage"
+                  color={summary.monthsToFullBuffer ? 'green' : 'amber'}
+                  icon={summary.monthsToFullBuffer ? CheckCircle : AlertTriangle}
                 />
                 <SummaryCard 
                   label="Mortgage Free" 
                   value={summary.mortgagePayoffDate ? new Date(summary.mortgagePayoffDate).getFullYear().toString() : 'Active'} 
                   subtext="Payoff Year"
                   color="blue"
+                  icon={Home}
                 />
                 <SummaryCard 
-                  label="Principal" 
-                  value={formatMoney(mortgage.principal)} 
-                  subtext="Starting Amount"
+                  label="Cost of Inflation" 
+                  value={`-${summary.purchasingPowerLoss.toFixed(1)}%`} 
+                  subtext="Purchasing Power (20Y)"
+                  color="red"
+                  icon={TrendingUp}
                 />
             </div>
 
@@ -123,9 +169,33 @@ export default function App() {
                         <Card title="Mortgage Burndown">
                             <MortgageChart data={logs} />
                         </Card>
+                        <InterestSavedChart />
                         <DepositoGrowthChart />
                     </div>
                     <div className="space-y-6">
+                        <Card title="Macroeconomics (Risk Analysis)" className="border-l-4 border-l-rose-400">
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="flex justify-between items-center mb-1">
+                                        <label className="text-xs font-bold text-slate-600">Global Inflation Rate</label>
+                                        <span className="text-sm font-bold text-rose-600">{macro.inflationRate}%</span>
+                                    </div>
+                                    <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="15" 
+                                        step="0.5"
+                                        className="w-full accent-rose-500 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                                        value={macro.inflationRate}
+                                        onChange={(e) => setMacro({...macro, inflationRate: parseFloat(e.target.value)})}
+                                    />
+                                    <p className="text-[10px] text-slate-500 mt-2">
+                                        Higher inflation erodes purchasing power. If Inflation &gt; Salary Growth ({income.annualIncreasePercent}%), risk increases significantly.
+                                    </p>
+                                </div>
+                            </div>
+                        </Card>
+
                         <Card title="Quick Edit Expenses">
                             <ExpensesTable />
                         </Card>
@@ -229,6 +299,8 @@ export default function App() {
                        </div>
                    </div>
                    
+                   <MortgageAmortizationChart />
+
                    <Card title="Extra Payment Log">
                       <div className="overflow-auto max-h-96">
                         <table className="w-full text-xs text-left">

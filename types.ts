@@ -4,12 +4,16 @@ export enum ScenarioType {
   WORST_CASE = 'WORST_CASE'
 }
 
+export interface MacroConfig {
+  inflationRate: number; // Global annual inflation rate %
+}
+
 export interface Expense {
   id: string;
   name: string;
   category: 'MANDATORY' | 'DISCRETIONARY';
   amount: number;
-  annualIncreasePercent: number;
+  annualIncreasePercent: number; // Treated as specific item inflation or spread
 }
 
 export interface IncomeConfig {
@@ -99,6 +103,9 @@ export interface SimulationResult {
     totalInterestPaid: number;
     totalInterestSaved: number;
     liquidityRunwayMonths: number;
+    lowestLiquidityMonths: number; // New
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    riskReason: string; // New
+    purchasingPowerLoss: number; // % of value lost due to inflation
   };
 }

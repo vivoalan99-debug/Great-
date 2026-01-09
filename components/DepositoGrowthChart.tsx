@@ -96,7 +96,7 @@ export const DepositoGrowthChart = () => {
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 formatter={(value: number, name: string) => [
                     formatMoney(value), 
-                    name === 'cumulativeDepositoInterest' ? 'Total Interest' : 'Bucket Balance'
+                    name === 'cumulativeDepositoInterest' ? 'Total Interest Earned' : 'Extra Payment Bucket'
                 ]}
                 labelStyle={{ fontWeight: 'bold', color: '#64748b', marginBottom: '0.5rem' }}
             />
