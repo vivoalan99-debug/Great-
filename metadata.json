@@ -1,0 +1,5 @@
+{
+  "name": "FinSim: Mortgage & Survival",
+  "description": "A deterministic financial simulation engine for mortgage repayment strategies, emergency fund planning, and risk analysis under various employment scenarios.",
+  "requestFramePermissions": []
+}
