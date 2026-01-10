@@ -3,7 +3,7 @@ import { useStore } from './store/useStore';
 import { 
   LayoutDashboard, Wallet, Home, PieChart, 
   Settings, Menu, X, AlertTriangle, CheckCircle,
-  ShieldAlert, ShieldCheck, PiggyBank, TrendingDown, Download, FileText
+  ShieldAlert, ShieldCheck, PiggyBank, TrendingDown, Download, FileText, Info
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -243,12 +243,24 @@ export default function App() {
                  {isExporting ? 'Generating...' : 'Snapshot PDF'}
                </button>
 
-               <div 
-                 title={`Assessment: ${summary.riskReason}`}
-                 className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase transition-colors cursor-help ${riskConfig.bg} ${riskConfig.text}`}
-               >
-                  <riskConfig.icon size={14} />
-                  {summary.riskLevel} Risk
+               <div className="relative group">
+                   <div 
+                     className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase transition-colors cursor-help ${riskConfig.bg} ${riskConfig.text}`}
+                   >
+                      <riskConfig.icon size={14} />
+                      {summary.riskLevel} Risk
+                   </div>
+                   
+                   {/* Custom Tooltip */}
+                   <div className="absolute top-full right-0 mt-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                        <div className="flex items-center gap-2 font-semibold mb-1 border-b border-slate-600 pb-1">
+                            <Info size={12} className="text-blue-400" />
+                            Risk Assessment
+                        </div>
+                        <div className="text-slate-300 leading-relaxed">{summary.riskReason}</div>
+                        {/* Arrow */}
+                        <div className="absolute -top-1 right-6 w-2 h-2 bg-slate-800 rotate-45"></div>
+                   </div>
                </div>
             </div>
         </header>
@@ -481,37 +493,67 @@ export default function App() {
                         <table className="w-full text-xs text-left whitespace-nowrap">
                             <thead className="bg-slate-50">
                                 <tr>
-                                    <th className="p-3 sticky left-0 bg-slate-50">Date</th>
-                                    <th className="p-3">Event</th>
-                                    <th className="p-3 text-right">Total Income</th>
-                                    <th className="p-3 text-right">Total Exp</th>
-                                    <th className="p-3 text-right">Mortgage Paid</th>
-                                    <th className="p-3 text-right">Net Flow</th>
-                                    <th className="p-3 text-right bg-emerald-50 text-emerald-800">Buffer</th>
-                                    <th className="p-3 text-right bg-green-50 text-green-800">Emergency</th>
-                                    <th className="p-3 text-right bg-blue-50 text-blue-800">Extra Bucket</th>
+                                    <th className="p-3 sticky left-0 bg-slate-50 border-b border-slate-200">Date</th>
+                                    <th className="p-3 border-b border-slate-200">Event</th>
+                                    <th className="p-3 text-right border-b border-slate-200">Total Income</th>
+                                    <th className="p-3 text-right border-b border-slate-200">Total Exp</th>
+                                    <th className="p-3 text-right border-b border-slate-200">Reg Pmt</th>
+                                    <th className="p-3 text-right border-b border-slate-200 text-blue-600">Extra Pmt</th>
+                                    <th className="p-3 text-right border-b border-slate-200 min-w-[120px]">Principal (Pre &rarr; End)</th>
+                                    <th className="p-3 text-right border-b border-slate-200 min-w-[120px]">Installment (Old &rarr; New)</th>
+                                    <th className="p-3 text-right border-b border-slate-200">Net Flow</th>
+                                    <th className="p-3 text-right bg-emerald-50 text-emerald-800 border-b border-emerald-100">Buffer</th>
+                                    <th className="p-3 text-right bg-green-50 text-green-800 border-b border-green-100">Emergency</th>
+                                    <th className="p-3 text-right bg-blue-50 text-blue-800 border-b border-blue-100">Extra Bucket</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 font-mono">
-                                {logs.map((log) => (
-                                    <tr key={log.monthIndex} className="hover:bg-slate-50">
-                                        <td className="p-3 sticky left-0 bg-white">{log.dateStr}</td>
+                                {logs.map((log) => {
+                                    const extraPaid = log.extraPaymentMade > 0;
+                                    const instChanged = Math.abs(log.installmentCurrent - log.installmentNext) > 100;
+                                    
+                                    return (
+                                    <tr key={log.monthIndex} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-3 sticky left-0 bg-white border-r border-slate-100 font-medium text-slate-500">{log.dateStr}</td>
                                         <td className="p-3">
                                             {log.events.map(e => (
-                                                <span key={e} className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] mr-1">{e}</span>
+                                                <span key={e} className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] mr-1 mb-1 border border-slate-200">{e}</span>
                                             ))}
                                         </td>
-                                        <td className="p-3 text-right">{formatMoney(log.totalIncome)}</td>
-                                        <td className="p-3 text-right text-slate-500">{formatMoney(log.totalExpenses)}</td>
-                                        <td className="p-3 text-right text-slate-500">{formatMoney(log.mortgagePaid)}</td>
+                                        <td className="p-3 text-right text-slate-600">{formatMoney(log.totalIncome)}</td>
+                                        <td className="p-3 text-right text-slate-400">{formatMoney(log.totalExpenses)}</td>
+                                        <td className="p-3 text-right text-slate-600">{formatMoney(log.mortgagePaid)}</td>
+                                        <td className="p-3 text-right text-blue-600 font-bold">
+                                            {extraPaid ? formatMoney(log.extraPaymentMade) : '-'}
+                                        </td>
+                                        <td className="p-3 text-right">
+                                            {extraPaid ? (
+                                                <div className="flex flex-col items-end gap-0.5">
+                                                    <span className="text-[10px] text-slate-400">{formatMoney(log.principalAfterRegular)}</span>
+                                                    <span className="text-xs text-slate-800 font-bold">&darr; {formatMoney(log.mortgageBalance)}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-500">{formatMoney(log.mortgageBalance)}</span>
+                                            )}
+                                        </td>
+                                        <td className="p-3 text-right">
+                                            {instChanged ? (
+                                                 <div className="flex flex-col items-end gap-0.5">
+                                                    <span className="text-[10px] text-slate-400 line-through decoration-slate-300">{formatMoney(log.installmentCurrent)}</span>
+                                                    <span className="text-xs text-emerald-600 font-bold">{formatMoney(log.installmentNext)}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-500">{formatMoney(log.installmentCurrent)}</span>
+                                            )}
+                                        </td>
                                         <td className={`p-3 text-right font-bold ${log.netFlow >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                             {formatMoney(log.netFlow)}
                                         </td>
-                                        <td className="p-3 text-right bg-emerald-50/50">{formatMoney(log.bufferBalance)}</td>
-                                        <td className="p-3 text-right bg-green-50/50">{formatMoney(log.emergencyBalance)}</td>
-                                        <td className="p-3 text-right bg-blue-50/50">{formatMoney(log.extraPaymentBucket)}</td>
+                                        <td className="p-3 text-right bg-emerald-50/50 text-slate-600">{formatMoney(log.bufferBalance)}</td>
+                                        <td className="p-3 text-right bg-green-50/50 text-slate-600">{formatMoney(log.emergencyBalance)}</td>
+                                        <td className="p-3 text-right bg-blue-50/50 text-slate-600">{formatMoney(log.extraPaymentBucket)}</td>
                                     </tr>
-                                ))}
+                                )})}
                             </tbody>
                         </table>
                     </div>

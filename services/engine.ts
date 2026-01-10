@@ -6,7 +6,7 @@ import { INTEREST_SCHEDULE, DEPOSITO_RATE, BPJS_GROWTH_RATE } from '../constants
 import { calculatePMT } from './mathUtils';
 
 // Helper: Simple money formatter for logs (M notation)
-const formatMoney = (n: number) => (n/1000000).toFixed(1) + 'M';
+const formatMoney = (n: number) => (n/1000000).toFixed(2) + 'M';
 
 const getAnnualRate = (yearIdx: number): number => {
   const yearNum = yearIdx + 1;
@@ -173,7 +173,7 @@ export const runSimulation = (
            } else {
                 currentInstallment = newInstallment; 
            }
-           events.push(`Rate Change: ${currentRate}%`);
+           events.push(`Rate Change: ${currentRate}% (Inst: ${formatMoney(currentInstallment)})`);
         }
 
         actualPayment = Math.min(currentInstallment, currentPrincipal + interestPayment);
@@ -302,7 +302,7 @@ export const runSimulation = (
                  installmentAfter: newInst,
                  interestSaved: interestSavedThisEvent
              });
-             events.push(`Extra Payment: ${formatMoney(amountToPay)}`);
+             events.push(`Extra Payment: ${formatMoney(amountToPay)} (Inst: ${formatMoney(currentInstallment)})`);
         }
 
         // B. Smart Payoff Check (Annual Rule)
@@ -325,6 +325,7 @@ export const runSimulation = (
                      // Deduction logic
                      extraPaymentMade += currentPrincipal; // Roughly tracking amount paid down
                      currentPrincipal = 0;
+                     currentInstallment = 0; // Mortgage is done
                      
                      let remainingCost = totalNeeded;
                      if (remainingCost > 0) {
