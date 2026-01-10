@@ -31,9 +31,16 @@ export const runSimulation = (
   let currentPrincipal = mortgage.principal;
   let monthsRemaining = mortgage.tenureYears * 12;
   
+  // -- Baseline State (Shadow tracking for standard amortization without extra payments) --
+  let baselinePrincipal = mortgage.principal;
+  let baselineInstallment = 0; 
+
   // Calculate Initial Installment (Year 1 rate)
   const initialRate = getAnnualRate(0);
   let currentInstallment = calculatePMT(currentPrincipal, initialRate, monthsRemaining);
+  
+  // Sync baseline initially
+  baselineInstallment = currentInstallment; 
   const initialInstallment = currentInstallment; // Used for buffers
 
   let bufferBalance = 0;
@@ -87,7 +94,7 @@ export const runSimulation = (
 
     // Capture state at start of month
     const principalStart = currentPrincipal;
-    const installmentCurrent = currentInstallment;
+    // const installmentCurrent = currentInstallment; // We update this below before logging
 
     // --- 1. Income ---
     let monthlyBase = 0;
@@ -161,7 +168,23 @@ export const runSimulation = (
     let interestPayment = 0;
     let principalPayment = 0;
     let actualPayment = 0;
+    const installmentBeforeUpdate = currentInstallment;
 
+    // A. Baseline (Shadow) Mortgage Update
+    // We update this regardless to track what the "Standard" installment would be
+    if (baselinePrincipal > 0) {
+        if (monthInYear === 0 && m > 0) {
+            const blInst = calculatePMT(baselinePrincipal, currentRate, monthsRemaining);
+            baselineInstallment = blInst;
+        }
+        const blInterest = baselinePrincipal * monthlyRate;
+        const blPayment = Math.min(baselineInstallment, baselinePrincipal + blInterest);
+        const blPrincipalPaid = blPayment - blInterest;
+        baselinePrincipal -= blPrincipalPaid;
+        if (baselinePrincipal < 0) baselinePrincipal = 0;
+    }
+
+    // B. Actual Mortgage Update
     if (currentPrincipal > 0) {
         interestPayment = currentPrincipal * monthlyRate;
         
@@ -173,7 +196,8 @@ export const runSimulation = (
            } else {
                 currentInstallment = newInstallment; 
            }
-           events.push(`Rate Change: ${currentRate}% (Inst: ${formatMoney(currentInstallment)})`);
+           // Use the shadow baseline installment for comparison
+           events.push(`Rate Change: ${currentRate}% (Std: ${formatMoney(baselineInstallment)} vs Act: ${formatMoney(currentInstallment)})`);
         }
 
         actualPayment = Math.min(currentInstallment, currentPrincipal + interestPayment);
@@ -431,7 +455,7 @@ export const runSimulation = (
         principalStart,
         principalAfterRegular,
         extraPaymentMade,
-        installmentCurrent: installmentCurrent,
+        installmentCurrent: installmentBeforeUpdate,
         installmentNext: currentInstallment
     });
 

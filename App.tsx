@@ -135,7 +135,10 @@ export default function App() {
          extraPaid ? formatMoney(log.extraPaymentMade) : "-",
          principalString,
          installmentString,
-         formatMoney(log.netFlow)
+         formatMoney(log.netFlow),
+         formatMoney(log.bufferBalance),
+         formatMoney(log.emergencyBalance),
+         formatMoney(log.extraPaymentBucket)
        ];
     });
 
@@ -143,16 +146,17 @@ export default function App() {
       startY: 25,
       head: [[
           "Date", "Events", "Income", "Expenses", "Regular Pmt", "Extra Pmt", 
-          "Principal (Before Extra -> End)", "Installment (Before -> After)", "Net Flow"
+          "Principal", "Installment", "Net Flow", "Buffer", "Emergency", "Extra Bucket"
       ]],
       body: tableData,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [59, 130, 246] }, // Blue-500
+      styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+      headStyles: { fillColor: [59, 130, 246], valign: 'middle' },
       columnStyles: {
-          0: { cellWidth: 20 },
-          1: { cellWidth: 35 },
-          6: { cellWidth: 40, fontStyle: 'bold' },
-          7: { cellWidth: 40, fontStyle: 'bold' }
+          0: { cellWidth: 16 }, // Date
+          1: { cellWidth: 25 }, // Events
+          // Money columns auto-width usually works, but Principal/Installment need space
+          6: { cellWidth: 25, fontStyle: 'bold' }, // Principal
+          7: { cellWidth: 25, fontStyle: 'bold' }, // Installment
       }
     });
 
