@@ -1,7 +1,7 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
 import { formatMoney } from '../services/mathUtils';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, ArrowUpRight } from 'lucide-react';
 
 export const ExpensesTable: React.FC = () => {
   const { expenses, setExpenses, updateExpense, macro } = useStore();
@@ -29,75 +29,90 @@ export const ExpensesTable: React.FC = () => {
   const totalMonthly = expenses.reduce((sum, e) => sum + e.amount, 0);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <table className="w-full text-sm text-left">
-        <thead className="bg-slate-50 text-slate-600 font-medium">
+    <div className="w-full -mx-2 sm:mx-0">
+      <table className="w-full text-sm text-left border-collapse">
+        <thead className="text-slate-500 font-medium border-b border-slate-100">
           <tr>
-            <th className="px-4 py-3">Expense Name</th>
-            <th className="px-4 py-3">Category</th>
-            <th className="px-4 py-3 text-right">Monthly (IDR)</th>
-            <th className="px-4 py-3 text-right cursor-help" title="Specific increase rate. Uses Global Inflation if higher.">Min Inc. %</th>
-            <th className="px-4 py-3 w-10"></th>
+            <th className="px-2 py-3 font-semibold text-xs uppercase tracking-wider">Expense</th>
+            <th className="px-2 py-3 font-semibold text-xs uppercase tracking-wider w-24 hidden sm:table-cell">Type</th>
+            <th className="px-2 py-3 text-right font-semibold text-xs uppercase tracking-wider w-32">Monthly</th>
+            <th className="px-2 py-3 text-right font-semibold text-xs uppercase tracking-wider w-20" title="Annual Increase %">
+                <span className="border-b border-dotted border-slate-400 cursor-help">Inc %</span>
+            </th>
+            <th className="px-2 py-3 w-8"></th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
-          {expenses.map((item) => (
-            <tr key={item.id} className="hover:bg-slate-50 group transition-colors">
-              <td className="px-4 py-2">
+        <tbody className="divide-y divide-slate-50">
+          {expenses.map((item) => {
+            const isOverridden = item.annualIncreasePercent > macro.inflationRate;
+            
+            return (
+            <tr key={item.id} className="group transition-colors hover:bg-slate-50/80">
+              <td className="px-2 py-2">
                 <input 
-                  className="bg-transparent font-medium text-slate-700 w-full focus:outline-none focus:border-b focus:border-blue-500"
+                  className="bg-transparent font-medium text-slate-700 w-full focus:outline-none focus:text-blue-600 placeholder:text-slate-300"
                   value={item.name}
+                  placeholder="Expense Name"
                   onChange={(e) => updateExpense(item.id, { name: e.target.value })}
                 />
               </td>
-              <td className="px-4 py-2">
+              <td className="px-2 py-2 hidden sm:table-cell">
                 <select 
-                   className="bg-transparent text-slate-500 text-xs rounded border border-slate-200 p-1"
+                   className={`bg-transparent text-[10px] uppercase font-bold tracking-wider rounded border border-transparent hover:border-slate-200 p-1 cursor-pointer focus:outline-none focus:border-blue-300 ${item.category === 'MANDATORY' ? 'text-rose-600 bg-rose-50/50' : 'text-emerald-600 bg-emerald-50/50'}`}
                    value={item.category}
                    onChange={(e) => updateExpense(item.id, { category: e.target.value as any })}
                 >
-                  <option value="MANDATORY">MANDATORY</option>
-                  <option value="DISCRETIONARY">DISCRETIONARY</option>
+                  <option value="MANDATORY">Mandatory</option>
+                  <option value="DISCRETIONARY">Flexible</option>
                 </select>
               </td>
-              <td className="px-4 py-2 text-right">
-                <input 
-                  className="bg-transparent text-right w-full focus:outline-none focus:border-b focus:border-blue-500 font-mono text-slate-700"
-                  value={item.amount.toLocaleString('id-ID')}
-                  onChange={(e) => handleAmountChange(item.id, e.target.value)}
-                />
+              <td className="px-2 py-2 text-right">
+                <div className="relative">
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 text-xs pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">Rp</span>
+                    <input 
+                    className="bg-transparent text-right w-full focus:outline-none focus:text-blue-600 font-mono text-slate-700 font-medium"
+                    value={item.amount.toLocaleString('id-ID')}
+                    onChange={(e) => handleAmountChange(item.id, e.target.value)}
+                    />
+                </div>
               </td>
-              <td className="px-4 py-2 text-right">
-                <input 
-                  type="number"
-                  className={`bg-transparent text-right w-12 focus:outline-none focus:border-b focus:border-blue-500 ${item.annualIncreasePercent < macro.inflationRate ? 'text-slate-400' : 'text-slate-700'}`}
-                  value={item.annualIncreasePercent}
-                  onChange={(e) => updateExpense(item.id, { annualIncreasePercent: parseFloat(e.target.value) })}
-                />
+              <td className="px-2 py-2 text-right">
+                <div className="flex items-center justify-end gap-1">
+                    {isOverridden && <ArrowUpRight size={10} className="text-amber-500" />}
+                    <input 
+                    type="number"
+                    className={`bg-transparent text-right w-10 focus:outline-none focus:border-b focus:border-blue-500 font-mono text-xs ${isOverridden ? 'text-amber-600 font-bold' : 'text-slate-400'}`}
+                    value={item.annualIncreasePercent}
+                    onChange={(e) => updateExpense(item.id, { annualIncreasePercent: parseFloat(e.target.value) })}
+                    />
+                </div>
               </td>
-              <td className="px-4 py-2 text-center">
+              <td className="px-2 py-2 text-center">
                 <button 
                     onClick={() => removeExpense(item.id)}
-                    className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="text-slate-300 hover:text-rose-500 p-1 rounded-md hover:bg-rose-50 transition-all opacity-0 group-hover:opacity-100"
                 >
-                    <Trash2 size={16} />
+                    <Trash2 size={14} />
                 </button>
               </td>
             </tr>
-          ))}
-          <tr className="bg-slate-50 font-semibold text-slate-700">
-            <td className="px-4 py-3" colSpan={2}>Total Monthly Expenses</td>
-            <td className="px-4 py-3 text-right text-blue-700">{formatMoney(totalMonthly)}</td>
-            <td colSpan={2} className="text-xs text-slate-400 font-normal px-4">Global: {macro.inflationRate}%</td>
+          )})}
+          <tr className="bg-slate-50/50 font-semibold text-slate-700 border-t border-slate-200">
+            <td className="px-2 py-3 text-xs uppercase text-slate-500" colSpan={2}>Total</td>
+            <td className="px-2 py-3 text-right text-blue-700 font-bold">{formatMoney(totalMonthly)}</td>
+            <td className="px-2 py-3 text-right text-xs text-slate-400">
+                Avg {((expenses.reduce((acc, curr) => acc + curr.annualIncreasePercent, 0) / expenses.length) || 0).toFixed(1)}%
+            </td>
+            <td></td>
           </tr>
         </tbody>
       </table>
-      <div className="p-2 bg-slate-50 border-t border-slate-200">
+      <div className="mt-3 flex justify-center">
           <button 
             onClick={addExpense}
-            className="flex items-center gap-2 text-xs font-medium text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded transition-colors"
+            className="flex items-center gap-2 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-full transition-colors border border-dashed border-blue-200 hover:border-blue-300"
           >
-              <Plus size={14} /> Add Expense
+              <Plus size={14} /> Add New Expense
           </button>
       </div>
     </div>

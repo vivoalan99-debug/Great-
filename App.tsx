@@ -3,13 +3,20 @@ import { useStore } from './store/useStore';
 import { 
   LayoutDashboard, Wallet, Home, PieChart, 
   Settings, Menu, X, AlertTriangle, CheckCircle,
-  ShieldAlert, ShieldCheck, PiggyBank, TrendingUp
+  ShieldAlert, ShieldCheck, PiggyBank, TrendingDown, Download, FileText
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
+
 import { ExpensesTable } from './components/ExpensesTable';
 import { CashflowChart, MortgageChart } from './components/Charts';
+import { MonthlyCashflowChart } from './components/MonthlyCashflowChart';
 import { DepositoGrowthChart } from './components/DepositoGrowthChart';
 import { InterestSavedChart } from './components/InterestSavedChart';
 import { MortgageAmortizationChart } from './components/MortgageAmortizationChart';
+import { YearlySummaryTable } from './components/YearlySummaryTable';
+import { DepositoImpactAnalysis } from './components/DepositoImpactAnalysis';
 import { Card, SummaryCard } from './components/ui/Card';
 import { formatMoney } from './services/mathUtils';
 import { ScenarioType } from './types';
@@ -17,12 +24,15 @@ import { ScenarioType } from './types';
 const SidebarItem = ({ icon: Icon, label, active, onClick, collapsed }: any) => (
   <button 
     onClick={onClick}
-    className={`flex items-center w-full gap-3 px-3 py-2.5 rounded-lg transition-all ${
+    className={`flex items-center w-full gap-3 px-3 py-2.5 rounded-lg transition-all group ${
       active ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
     }`}
+    title={collapsed ? label : ''}
   >
-    <Icon size={20} />
-    {!collapsed && <span>{label}</span>}
+    <Icon size={20} className="shrink-0" />
+    <div className={`overflow-hidden transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
+        <span className="whitespace-nowrap">{label}</span>
+    </div>
   </button>
 );
 
@@ -35,10 +45,120 @@ export default function App() {
   
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isExporting, setIsExporting] = useState(false);
   
   useEffect(() => {
     run();
   }, []);
+
+  const handleExportPDF = async () => {
+    const element = document.getElementById('report-content');
+    if (!element) return;
+
+    setIsExporting(true);
+
+    try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const canvas = await html2canvas(element, {
+            scale: 1.5,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#f8fafc'
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({
+            orientation: 'p',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        const imgWidth = 210; 
+        const pageHeight = 297; 
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        let heightLeft = imgHeight;
+        let position = 0;
+
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+
+        while (heightLeft >= 0) {
+            position = heightLeft - imgHeight;
+            pdf.addPage();
+            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+            heightLeft -= pageHeight;
+        }
+
+        const dateStr = new Date().toISOString().split('T')[0];
+        pdf.save(`FinSim-Report-${activeTab}-${dateStr}.pdf`);
+    } catch (err) {
+        console.error("Export failed", err);
+        alert("Failed to generate PDF. Check console for details.");
+    } finally {
+        setIsExporting(false);
+    }
+  };
+
+  const handleExportLedgerPDF = () => {
+    if (!simulationResult) return;
+    
+    const doc = new jsPDF('l', 'mm', 'a4'); // Landscape for more columns
+    const logs = simulationResult.logs;
+
+    doc.setFontSize(16);
+    doc.text("FinSim - Monthly Simulation Ledger", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 20);
+
+    const tableData = logs.map(log => {
+       const extraPaid = log.extraPaymentMade > 0;
+       
+       // Format: Principal Before (after regular pmt) -> After (after extra pmt)
+       const principalString = extraPaid 
+          ? `${(log.principalAfterRegular/1000000).toFixed(1)}M -> ${(log.mortgageBalance/1000000).toFixed(1)}M`
+          : `${(log.mortgageBalance/1000000).toFixed(1)}M`;
+
+       // Format: Installment Before -> After
+       const instChanged = Math.abs(log.installmentCurrent - log.installmentNext) > 1000;
+       const installmentString = instChanged && extraPaid
+          ? `${(log.installmentCurrent/1000000).toFixed(1)}M -> ${(log.installmentNext/1000000).toFixed(1)}M`
+          : `${(log.installmentCurrent/1000000).toFixed(1)}M`;
+
+       return [
+         log.dateStr,
+         log.events.length > 0 ? log.events.join(", ") : "-",
+         formatMoney(log.totalIncome),
+         formatMoney(log.totalExpenses),
+         formatMoney(log.mortgagePaid),
+         extraPaid ? formatMoney(log.extraPaymentMade) : "-",
+         principalString,
+         installmentString,
+         formatMoney(log.netFlow)
+       ];
+    });
+
+    autoTable(doc, {
+      startY: 25,
+      head: [[
+          "Date", "Events", "Income", "Expenses", "Regular Pmt", "Extra Pmt", 
+          "Principal (Before Extra -> End)", "Installment (Before -> After)", "Net Flow"
+      ]],
+      body: tableData,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [59, 130, 246] }, // Blue-500
+      columnStyles: {
+          0: { cellWidth: 20 },
+          1: { cellWidth: 35 },
+          6: { cellWidth: 40, fontStyle: 'bold' },
+          7: { cellWidth: 40, fontStyle: 'bold' }
+      }
+    });
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    doc.save(`FinSim-Ledger-${dateStr}.pdf`);
+  };
 
   if (!simulationResult) return <div className="min-h-screen flex items-center justify-center text-slate-400">Initializing Engine...</div>;
 
@@ -76,20 +196,22 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* Sidebar */}
       <div className={`bg-white border-r border-slate-200 flex flex-col transition-all duration-300 ${collapsed ? 'w-16' : 'w-64'}`}>
-        <div className="h-16 flex items-center px-4 border-b border-slate-100 justify-between">
-            {!collapsed && <span className="font-bold text-lg text-slate-800 tracking-tight">FinSim</span>}
-            <button onClick={() => setCollapsed(!collapsed)} className="text-slate-400 hover:text-slate-600">
+        <div className="h-16 flex items-center px-4 border-b border-slate-100 justify-between shrink-0">
+            <div className={`font-bold text-lg text-slate-800 tracking-tight overflow-hidden transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
+                FinSim
+            </div>
+            <button onClick={() => setCollapsed(!collapsed)} className="text-slate-400 hover:text-slate-600 p-1">
                 {collapsed ? <Menu size={20} /> : <X size={20} />}
             </button>
         </div>
-        <div className="flex-1 p-3 space-y-1">
+        <div className="flex-1 p-3 space-y-1 overflow-hidden hover:overflow-y-auto custom-scrollbar">
             <SidebarItem icon={LayoutDashboard} label="Overview" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} collapsed={collapsed} />
             <SidebarItem icon={Wallet} label="Expenses" active={activeTab === 'expenses'} onClick={() => setActiveTab('expenses')} collapsed={collapsed} />
             <SidebarItem icon={Home} label="Mortgage" active={activeTab === 'mortgage'} onClick={() => setActiveTab('mortgage')} collapsed={collapsed} />
             <SidebarItem icon={PieChart} label="Simulation" active={activeTab === 'simulation'} onClick={() => setActiveTab('simulation')} collapsed={collapsed} />
         </div>
-        <div className="p-4 border-t border-slate-100">
-             {!collapsed && (
+        <div className="p-4 border-t border-slate-100 shrink-0">
+             <div className={`overflow-hidden transition-all duration-300 ${collapsed ? 'h-0 opacity-0' : 'h-auto opacity-100'}`}>
                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                  <p className="text-xs font-semibold text-slate-500 mb-2">SCENARIO</p>
                  <select 
@@ -102,16 +224,25 @@ export default function App() {
                     <option value={ScenarioType.WORST_CASE}>Worst Case</option>
                  </select>
                </div>
-             )}
+             </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 relative z-10">
             <h1 className="text-xl font-bold text-slate-800 capitalize">{activeTab}</h1>
             <div className="flex items-center gap-4">
+               <button 
+                onClick={handleExportPDF}
+                disabled={isExporting}
+                className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold uppercase transition-colors disabled:opacity-50"
+               >
+                 <Download size={14} />
+                 {isExporting ? 'Generating...' : 'Snapshot PDF'}
+               </button>
+
                <div 
                  title={`Assessment: ${summary.riskReason}`}
                  className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase transition-colors cursor-help ${riskConfig.bg} ${riskConfig.text}`}
@@ -124,12 +255,12 @@ export default function App() {
 
         {/* Scrollable Area */}
         <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          <div className="max-w-6xl mx-auto space-y-6">
+          <div id="report-content" className="max-w-6xl mx-auto space-y-6 pb-10">
             
             {/* Summary Cards Row */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <SummaryCard 
-                  label="Liquidity Runway" 
+                  label="Runway (Inc. Mortgage)" 
                   value={`${summary.liquidityRunwayMonths.toFixed(1)} Mo`} 
                   subtext={`Min: ${summary.lowestLiquidityMonths.toFixed(1)} Mo`}
                   color={riskConfig.color}
@@ -151,11 +282,11 @@ export default function App() {
                   icon={Home}
                 />
                 <SummaryCard 
-                  label="Cost of Inflation" 
+                  label="Purchasing Power" 
                   value={`-${summary.purchasingPowerLoss.toFixed(1)}%`} 
-                  subtext="Purchasing Power (20Y)"
+                  subtext="Lost over 20 Years"
                   color="red"
-                  icon={TrendingUp}
+                  icon={TrendingDown}
                 />
             </div>
 
@@ -166,6 +297,7 @@ export default function App() {
                         <Card title="Funds Accumulation">
                             <CashflowChart data={logs} />
                         </Card>
+                        <MonthlyCashflowChart />
                         <Card title="Mortgage Burndown">
                             <MortgageChart data={logs} />
                         </Card>
@@ -173,25 +305,48 @@ export default function App() {
                         <DepositoGrowthChart />
                     </div>
                     <div className="space-y-6">
-                        <Card title="Macroeconomics (Risk Analysis)" className="border-l-4 border-l-rose-400">
-                            <div className="space-y-4">
+                        <Card title="Macroeconomics" className="border-l-4 border-l-rose-400">
+                            <div className="space-y-6">
                                 <div>
-                                    <div className="flex justify-between items-center mb-1">
-                                        <label className="text-xs font-bold text-slate-600">Global Inflation Rate</label>
-                                        <span className="text-sm font-bold text-rose-600">{macro.inflationRate}%</span>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className="p-1 bg-rose-100 rounded text-rose-600">
+                                                <TrendingDown size={14} />
+                                            </div>
+                                            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">Global Inflation</label>
+                                        </div>
+                                        <span className="text-lg font-bold text-rose-600">{macro.inflationRate}%</span>
                                     </div>
                                     <input 
                                         type="range" 
                                         min="0" 
                                         max="15" 
                                         step="0.5"
-                                        className="w-full accent-rose-500 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                                        className="w-full accent-rose-500 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer"
                                         value={macro.inflationRate}
                                         onChange={(e) => setMacro({...macro, inflationRate: parseFloat(e.target.value)})}
                                     />
-                                    <p className="text-[10px] text-slate-500 mt-2">
-                                        Higher inflation erodes purchasing power. If Inflation &gt; Salary Growth ({income.annualIncreasePercent}%), risk increases significantly.
-                                    </p>
+                                    <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-medium">
+                                        <span>0% (Ideal)</span>
+                                        <span>5.9% (Avg)</span>
+                                        <span>15% (Crisis)</span>
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                    <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">Purchasing Power Impact</p>
+                                    <div className="flex justify-between items-end">
+                                        <span className="text-xs text-slate-600">Value of 100M in 20y</span>
+                                        <span className="text-sm font-bold text-slate-800">
+                                            {formatMoney(100000000 * Math.pow(1 - macro.inflationRate/100, 20))}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-slate-200 h-1.5 rounded-full mt-2 overflow-hidden">
+                                        <div 
+                                            className="bg-slate-500 h-full rounded-full transition-all duration-500"
+                                            style={{ width: `${Math.max(0, 100 - summary.purchasingPowerLoss)}%` }}
+                                        ></div>
+                                    </div>
                                 </div>
                             </div>
                         </Card>
@@ -199,34 +354,40 @@ export default function App() {
                         <Card title="Quick Edit Expenses">
                             <ExpensesTable />
                         </Card>
+                        
                         <Card title="Income Settings">
                            <div className="space-y-4">
                               <div>
-                                 <label className="block text-xs font-medium text-slate-500 mb-1">Base Monthly Salary</label>
-                                 <input 
-                                   type="number" 
-                                   className="w-full border border-slate-200 rounded p-2 text-sm"
-                                   value={income.baseSalary}
-                                   onChange={(e) => setIncome({...income, baseSalary: parseInt(e.target.value)})} 
-                                 />
+                                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Base Monthly Salary</label>
+                                 <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">Rp</span>
+                                    <input 
+                                        type="number" 
+                                        className="w-full border border-slate-200 rounded pl-8 p-2 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                                        value={income.baseSalary}
+                                        onChange={(e) => setIncome({...income, baseSalary: parseInt(e.target.value)})} 
+                                    />
+                                 </div>
                               </div>
-                              <div>
-                                 <label className="block text-xs font-medium text-slate-500 mb-1">Annual Increase (%)</label>
-                                 <input 
-                                   type="number" 
-                                   className="w-full border border-slate-200 rounded p-2 text-sm"
-                                   value={income.annualIncreasePercent}
-                                   onChange={(e) => setIncome({...income, annualIncreasePercent: parseFloat(e.target.value)})} 
-                                 />
-                              </div>
-                              <div>
-                                 <label className="block text-xs font-medium text-slate-500 mb-1">BPJS Initial Balance</label>
-                                 <input 
-                                   type="number" 
-                                   className="w-full border border-slate-200 rounded p-2 text-sm"
-                                   value={income.bpjsInitialBalance}
-                                   onChange={(e) => setIncome({...income, bpjsInitialBalance: parseInt(e.target.value)})} 
-                                 />
+                              <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">Annual Inc (%)</label>
+                                     <input 
+                                       type="number" 
+                                       className="w-full border border-slate-200 rounded p-2 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                                       value={income.annualIncreasePercent}
+                                       onChange={(e) => setIncome({...income, annualIncreasePercent: parseFloat(e.target.value)})} 
+                                     />
+                                  </div>
+                                  <div>
+                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">BPJS Balance</label>
+                                     <input 
+                                       type="number" 
+                                       className="w-full border border-slate-200 rounded p-2 text-sm font-medium text-slate-700 focus:outline-none focus:border-blue-500"
+                                       value={income.bpjsInitialBalance}
+                                       onChange={(e) => setIncome({...income, bpjsInitialBalance: parseInt(e.target.value)})} 
+                                     />
+                                  </div>
                               </div>
                            </div>
                         </Card>
@@ -294,49 +455,28 @@ export default function App() {
                                </div>
                            </div>
                        </Card>
-                       <div className="lg:col-span-2">
+                       <div className="lg:col-span-2 space-y-6">
+                           <DepositoImpactAnalysis />
                            <InterestSavedChart />
                        </div>
                    </div>
                    
                    <MortgageAmortizationChart />
-
-                   <Card title="Extra Payment Log">
-                      <div className="overflow-auto max-h-96">
-                        <table className="w-full text-xs text-left">
-                            <thead className="bg-slate-50 sticky top-0">
-                                <tr>
-                                    <th className="p-2">Year</th>
-                                    <th className="p-2 text-right">Extra Paid</th>
-                                    <th className="p-2 text-right">Penalty</th>
-                                    <th className="p-2 text-right">Principal Reduced</th>
-                                    <th className="p-2 text-right">Inst. Before</th>
-                                    <th className="p-2 text-right">Inst. After</th>
-                                    <th className="p-2 text-right text-emerald-600">Interest Saved</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {simulationResult.yearLogs.map((log) => (
-                                    <tr key={log.year}>
-                                        <td className="p-2 font-medium">{2026 + log.year}</td>
-                                        <td className="p-2 text-right text-blue-600">{formatMoney(log.extraPaymentPaid)}</td>
-                                        <td className="p-2 text-right text-red-500">{formatMoney(log.penaltyPaid)}</td>
-                                        <td className="p-2 text-right font-bold">{formatMoney(log.principalReduced)}</td>
-                                        <td className="p-2 text-right text-slate-500">{formatMoney(log.installmentBefore)}</td>
-                                        <td className="p-2 text-right text-slate-700 font-medium">{formatMoney(log.installmentAfter)}</td>
-                                        <td className="p-2 text-right text-emerald-600 font-bold">{formatMoney(log.interestSaved)}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        {simulationResult.yearLogs.length === 0 && <p className="text-center p-4 text-slate-400">No extra payments triggered yet.</p>}
-                      </div>
-                   </Card>
+                   <YearlySummaryTable />
                 </div>
             )}
             
             {activeTab === 'simulation' && (
                 <Card title="Monthly Ledger">
+                    <div className="flex justify-end mb-4">
+                         <button 
+                            onClick={handleExportLedgerPDF}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-xs font-bold uppercase transition-colors"
+                        >
+                            <FileText size={14} />
+                            Export Ledger (PDF)
+                        </button>
+                    </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-xs text-left whitespace-nowrap">
                             <thead className="bg-slate-50">

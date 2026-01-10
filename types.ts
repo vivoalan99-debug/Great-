@@ -1,3 +1,4 @@
+
 export enum ScenarioType {
   NORMAL = 'NORMAL',
   UNEMPLOYED = 'UNEMPLOYED',
@@ -65,9 +66,16 @@ export interface MonthLog {
   mortgagePaid: number;
   mortgageInterest: number;
   mortgagePrincipalPaid: number;
-  mortgageBalance: number;
+  mortgageBalance: number; // End of month balance
   mortgageRate: number;
   
+  // New fields for Detailed PDF Export
+  principalStart: number;
+  principalAfterRegular: number;
+  extraPaymentMade: number;
+  installmentCurrent: number;
+  installmentNext: number;
+
   netFlow: number;
   
   bufferBalance: number;

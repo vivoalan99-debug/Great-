@@ -5,6 +5,9 @@ import {
 import { INTEREST_SCHEDULE, DEPOSITO_RATE, BPJS_GROWTH_RATE } from '../constants';
 import { calculatePMT } from './mathUtils';
 
+// Helper: Simple money formatter for logs (M notation)
+const formatMoney = (n: number) => (n/1000000).toFixed(1) + 'M';
+
 const getAnnualRate = (yearIdx: number): number => {
   const yearNum = yearIdx + 1;
   const schedule = INTEREST_SCHEDULE.find(s => yearNum >= s.startYear && yearNum <= s.endYear);
@@ -65,7 +68,12 @@ export const runSimulation = (
                                  scenario === ScenarioType.WORST_CASE ? 6 : 9999;
 
   for (let m = 0; m < maxMonths; m++) {
-    if (currentPrincipal <= 1000 && payoffDate === null) {
+    // 0. Pre-Check: Auto-Payoff for Micro Balances (Dust)
+    if (currentPrincipal > 0 && currentPrincipal < 10000) {
+        currentPrincipal = 0;
+    }
+
+    if (currentPrincipal <= 0 && payoffDate === null) {
       // Mortgage effectively paid
       currentPrincipal = 0;
       currentInstallment = 0;
@@ -76,6 +84,10 @@ export const runSimulation = (
     const monthInYear = m % 12;
     const currentRate = getAnnualRate(currentYearIdx);
     const monthlyRate = currentRate / 100 / 12;
+
+    // Capture state at start of month
+    const principalStart = currentPrincipal;
+    const installmentCurrent = currentInstallment;
 
     // --- 1. Income ---
     let monthlyBase = 0;
@@ -128,19 +140,12 @@ export const runSimulation = (
     const totalIncome = monthlyBase + monthlyBonus;
 
     // --- 2. Expenses with Inflation Impact ---
-    // Rule: Use the higher of Global Inflation or the specific expense increase rate
-    // This allows granular overrides for high-inflation items (like Education)
-    // while ensuring everything else scales with the Macro setting.
-    
     let mandExpenses = 0;
     let discExpenses = 0;
 
     expenses.forEach(e => {
-        // Determine effective growth rate for this item
         const effectiveRate = Math.max(macro.inflationRate, e.annualIncreasePercent);
-        
         const itemInflated = e.amount * Math.pow(1 + effectiveRate/100, currentYearIdx);
-        
         if (e.category === 'MANDATORY') mandExpenses += itemInflated;
         else discExpenses += itemInflated;
     });
@@ -159,26 +164,35 @@ export const runSimulation = (
 
     if (currentPrincipal > 0) {
         interestPayment = currentPrincipal * monthlyRate;
-        if (monthInYear === 0 || m === 0) {
-           if (monthInYear === 0 && m > 0) {
-               const newInstallment = calculatePMT(currentPrincipal, currentRate, monthsRemaining);
-               currentInstallment = newInstallment; 
-               events.push(`Rate Change: ${currentRate}%`);
+        
+        // Rate Change Adjustment
+        if (monthInYear === 0 && m > 0) {
+           const newInstallment = calculatePMT(currentPrincipal, currentRate, monthsRemaining);
+           if (newInstallment < initialInstallment * 0.5 && currentPrincipal > initialInstallment) {
+                currentInstallment = Math.min(initialInstallment, currentPrincipal + interestPayment);
+           } else {
+                currentInstallment = newInstallment; 
            }
+           events.push(`Rate Change: ${currentRate}%`);
         }
+
         actualPayment = Math.min(currentInstallment, currentPrincipal + interestPayment);
         principalPayment = actualPayment - interestPayment;
         if (principalPayment < 0) principalPayment = 0;
     }
 
+    // Update Principal (Regular Payment)
+    currentPrincipal -= principalPayment;
+    accumulatedInterestPaid += interestPayment;
+    
+    // Capture principal after regular payment but before extra
+    const principalAfterRegular = currentPrincipal;
+
     // --- 4. Targets ---
-    // Inflation Adjustment: Targets should technically grow with inflation/salary, 
-    // but often people keep the fixed amount target. 
-    // For this engine, we will scale the targets based on CURRENT expense levels (which include inflation).
-    const M_avg = initialInstallment; // Mortgage doesn't inflate
+    const M_avg = initialInstallment;
     const E = totalExpenses; 
     const bufferTarget = 3 * E + 1 * M_avg;
-    const emergencyTarget = 12 * E + 12 * M_avg;
+    const emergencyTarget = 6 * E + 6 * M_avg;
 
     // --- 5. Net Flow & Allocation ---
     let netFlow = totalIncome - totalExpenses - actualPayment;
@@ -245,8 +259,11 @@ export const runSimulation = (
         accumulatedDepositoInterest += monthlyDepositoInterest;
     }
 
-    // --- 7. Extra Payment ---
+    // --- 7. Extra Payment (Scheduled) & Annual Smart Payoff ---
+    let extraPaymentMade = 0;
+
     if (m > 0 && m % 12 === 0 && currentPrincipal > 0) {
+        // A. Regular Extra Payment
         const minExtra = mortgage.extraPaymentMinMultiple * currentInstallment;
         let availableExtra = extraBucket;
         let amountToPay = 0;
@@ -265,8 +282,10 @@ export const runSimulation = (
              
              currentPrincipal -= finalRed;
              extraBucket -= amountToPay; 
+             extraPaymentMade = amountToPay;
              
-             const remainingTermMonths = monthsRemaining; 
+             // Recalculate Installment
+             const remainingTermMonths = monthsRemaining - 1; // It will be decremented at end of loop, but we calculate new inst for next month
              let newInst = calculatePMT(currentPrincipal, currentRate, remainingTermMonths);
              if (newInst > instBefore) newInst = instBefore; 
              currentInstallment = newInst;
@@ -285,16 +304,57 @@ export const runSimulation = (
              });
              events.push(`Extra Payment: ${formatMoney(amountToPay)}`);
         }
+
+        // B. Smart Payoff Check (Annual Rule)
+        if (currentPrincipal > 0 && emergencyBalance > 0) {
+             const smartPayoffThreshold = emergencyBalance / 3;
+             
+             if (currentPrincipal <= smartPayoffThreshold) {
+                 const penaltyAmt = currentPrincipal * (mortgage.penaltyPercent / 100);
+                 const totalNeeded = currentPrincipal + penaltyAmt;
+                 
+                 const totalLiquid = extraBucket + deposito + bufferBalance + emergencyBalance;
+                 
+                 if (totalLiquid >= totalNeeded) {
+                     events.push(`Smart Payoff (Emergency Rule)`);
+                     
+                     const projectedTotalFuturePayments = currentInstallment * (monthsRemaining - 1);
+                     const interestSaved = Math.max(0, projectedTotalFuturePayments - currentPrincipal);
+                     accumulatedInterestSaved += interestSaved;
+
+                     // Deduction logic
+                     extraPaymentMade += currentPrincipal; // Roughly tracking amount paid down
+                     currentPrincipal = 0;
+                     
+                     let remainingCost = totalNeeded;
+                     if (remainingCost > 0) {
+                         if (extraBucket >= remainingCost) { extraBucket -= remainingCost; remainingCost = 0; }
+                         else { remainingCost -= extraBucket; extraBucket = 0; }
+                     }
+                     if (remainingCost > 0) {
+                         if (deposito >= remainingCost) { deposito -= remainingCost; remainingCost = 0; }
+                         else { remainingCost -= deposito; deposito = 0; }
+                     }
+                     if (remainingCost > 0) {
+                         if (bufferBalance >= remainingCost) { bufferBalance -= remainingCost; remainingCost = 0; }
+                         else { remainingCost -= bufferBalance; bufferBalance = 0; }
+                     }
+                     if (remainingCost > 0) {
+                         if (emergencyBalance >= remainingCost) { emergencyBalance -= remainingCost; remainingCost = 0; }
+                         else { remainingCost -= emergencyBalance; emergencyBalance = 0; }
+                     }
+                 }
+             }
+        }
     }
 
-    // Update Principal
-    currentPrincipal -= principalPayment;
-    accumulatedInterestPaid += interestPayment;
     monthsRemaining--;
 
     // --- Risk Analyst (Per Month) ---
     const totalLiquid = bufferBalance + emergencyBalance + extraBucket + deposito;
-    const liquidityMonths = totalExpenses > 0 ? totalLiquid / totalExpenses : 999;
+    const monthlyBurnRate = totalExpenses + (currentPrincipal > 0 ? currentInstallment : 0);
+    const liquidityMonths = monthlyBurnRate > 0 ? totalLiquid / monthlyBurnRate : 999;
+    
     const dateStr = new Date(2026, m, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
     
     // Update global Lowest
@@ -307,9 +367,7 @@ export const runSimulation = (
     let monthlyRisk: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
     let reason = '';
 
-    // Check for Deficit first
     if (netFlow < 0 && totalLiquid <= 0 && Math.abs(netFlow) > 0.01) {
-        // Actually run out of money
         monthlyRisk = 'HIGH';
         reason = 'Insolvency (Bankruptcy)';
     } else {
@@ -317,20 +375,17 @@ export const runSimulation = (
             if (liquidityMonths < 3) { monthlyRisk = 'HIGH'; reason = 'Runway < 3mo (Unemployed)'; }
             else if (liquidityMonths < 6) { monthlyRisk = 'MEDIUM'; reason = 'Runway < 6mo (Unemployed)'; }
         } else {
-            // Employed
-            if (liquidityMonths < 1) { monthlyRisk = 'HIGH'; reason = 'Runway < 1mo'; }
+            if (liquidityMonths < 1) { monthlyRisk = 'HIGH'; reason = 'Runway < 1mo (High Fragility)'; }
             else if (liquidityMonths < 3) { monthlyRisk = 'MEDIUM'; reason = 'Runway < 3mo'; }
             
-            // NEW: Inflation/Stagflation Risk Check
-            // If inflation is higher than salary growth, purchasing power erodes, leading to long term risk
             if (macro.inflationRate > income.annualIncreasePercent + 1) {
-                // If expenses have grown to be > 80% of income due to inflation
-                const dti = totalExpenses / totalIncome;
-                if (dti > 0.9) {
+                const monthlyObligations = totalExpenses + (currentPrincipal > 0 ? currentInstallment : 0);
+                const dti = monthlyObligations / totalIncome;
+                
+                if (dti > 0.95) {
                      monthlyRisk = 'HIGH';
-                     reason = 'Stagflation: Costs overtaking Income';
+                     reason = 'Stagflation: Debt+Costs > Income';
                 } else if (monthlyRisk === 'LOW') {
-                    // Downgrade to Medium purely due to macroeconomic squeeze
                     monthlyRisk = 'MEDIUM';
                     reason = 'High Inflation Erosion';
                 }
@@ -338,13 +393,11 @@ export const runSimulation = (
         }
     }
 
-    // Update Global Max Risk
     const severity = monthlyRisk === 'HIGH' ? 2 : monthlyRisk === 'MEDIUM' ? 1 : 0;
     if (severity > maxRiskSeverity) {
         maxRiskSeverity = severity;
         maxRiskReason = reason + ` at ${dateStr}`;
     } else if (severity === maxRiskSeverity && monthlyRisk === 'HIGH' && hasBankruptcy) {
-        // Bankruptcy trumps other highs
          maxRiskReason = `Bankruptcy at ${bankruptcyDate}`;
     }
 
@@ -371,7 +424,14 @@ export const runSimulation = (
         events,
         riskLevel: monthlyRisk,
         depositoInterestEarned: monthlyDepositoInterest,
-        cumulativeDepositoInterest: accumulatedDepositoInterest
+        cumulativeDepositoInterest: accumulatedDepositoInterest,
+        
+        // New Fields
+        principalStart,
+        principalAfterRegular,
+        extraPaymentMade,
+        installmentCurrent: installmentCurrent,
+        installmentNext: currentInstallment
     });
 
     if (currentPrincipal <= 1 && payoffDate === null) {
@@ -379,7 +439,6 @@ export const runSimulation = (
     }
   }
 
-  // --- Final Summary Risk Logic ---
   let finalRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
   
   if (hasBankruptcy) {
@@ -387,13 +446,14 @@ export const runSimulation = (
       maxRiskReason = `Bankruptcy occurred in ${bankruptcyDate}`;
   } else if (maxRiskSeverity === 2) {
       finalRiskLevel = 'HIGH';
-      // maxRiskReason already set
   } else if (maxRiskSeverity === 1) {
       finalRiskLevel = 'MEDIUM';
   }
 
-  // Purchasing Power Impact
-  // Compare initial expense vs expense at year 20 with just the inflation applied
+  const lastLog = logs[logs.length - 1];
+  const finalLiquid = lastLog.bufferBalance + lastLog.emergencyBalance + lastLog.extraPaymentBucket + lastLog.depositoBalance;
+  const finalBurn = lastLog.totalExpenses + (lastLog.mortgageBalance > 0 ? currentInstallment : 0); 
+  const finalRunway = finalBurn > 0 ? finalLiquid / finalBurn : 0;
   const purchasingPowerLoss = (Math.pow(1 + macro.inflationRate/100, 20) - 1) * 100;
 
   return {
@@ -405,7 +465,7 @@ export const runSimulation = (
           mortgagePayoffDate: payoffDate,
           totalInterestPaid: accumulatedInterestPaid,
           totalInterestSaved: accumulatedInterestSaved,
-          liquidityRunwayMonths: logs[logs.length - 1].bufferBalance > 0 ? logs[logs.length - 1].bufferBalance / logs[logs.length - 1].totalExpenses : 0, // Approx final
+          liquidityRunwayMonths: finalRunway,
           lowestLiquidityMonths: lowestLiquidity,
           riskLevel: finalRiskLevel,
           riskReason: maxRiskReason,
@@ -413,5 +473,3 @@ export const runSimulation = (
       }
   };
 };
-
-const formatMoney = (n: number) => (n/1000000).toFixed(1) + 'M';
