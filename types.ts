@@ -25,6 +25,13 @@ export interface IncomeConfig {
   bpjsInitialBalance: number;
 }
 
+export interface InterestRateTier {
+  id: string;
+  startMonth: number; // 1-based (e.g. 1)
+  endMonth: number;   // 1-based (e.g. 24)
+  rate: number;       // Percentage (e.g. 2.68)
+}
+
 export interface MortgageConfig {
   principal: number;
   startDate: string; // ISO Date
@@ -32,6 +39,7 @@ export interface MortgageConfig {
   penaltyPercent: number; // e.g. 1 for 1%
   extraPaymentMinMultiple: number; // 6x rule
   useDeposito: boolean;
+  rates: InterestRateTier[]; // Dynamic schedule
 }
 
 export interface SimulationState {

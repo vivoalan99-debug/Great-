@@ -1,17 +1,23 @@
 import { 
   Expense, IncomeConfig, MortgageConfig, MacroConfig, ScenarioType, 
-  SimulationResult, MonthLog, YearLog 
+  SimulationResult, MonthLog, YearLog, InterestRateTier
 } from '../types';
-import { INTEREST_SCHEDULE, DEPOSITO_RATE, BPJS_GROWTH_RATE } from '../constants';
+import { DEPOSITO_RATE, BPJS_GROWTH_RATE } from '../constants';
 import { calculatePMT } from './mathUtils';
 
 // Helper: Simple money formatter for logs (M notation)
 const formatMoney = (n: number) => (n/1000000).toFixed(2) + 'M';
 
-const getAnnualRate = (yearIdx: number): number => {
-  const yearNum = yearIdx + 1;
-  const schedule = INTEREST_SCHEDULE.find(s => yearNum >= s.startYear && yearNum <= s.endYear);
-  return schedule ? schedule.rate : 12.0;
+// Helper: Get Rate for a specific month (1-based index)
+const getRateForMonth = (monthIndex: number, rates: InterestRateTier[]): number => {
+  const currentMonthNum = monthIndex + 1;
+  const tier = rates.find(r => currentMonthNum >= r.startMonth && currentMonthNum <= r.endMonth);
+  // Fallback to the last defined rate or a default high rate if configuration is missing
+  if (!tier) {
+      if (rates.length > 0) return rates[rates.length - 1].rate;
+      return 12.0;
+  }
+  return tier.rate;
 };
 
 export const runSimulation = (
@@ -35,8 +41,8 @@ export const runSimulation = (
   let baselinePrincipal = mortgage.principal;
   let baselineInstallment = 0; 
 
-  // Calculate Initial Installment (Year 1 rate)
-  const initialRate = getAnnualRate(0);
+  // Calculate Initial Installment (Month 1 Rate)
+  const initialRate = getRateForMonth(0, mortgage.rates);
   let currentInstallment = calculatePMT(currentPrincipal, initialRate, monthsRemaining);
   
   // Sync baseline initially
@@ -89,12 +95,14 @@ export const runSimulation = (
 
     const currentYearIdx = Math.floor(m / 12);
     const monthInYear = m % 12;
-    const currentRate = getAnnualRate(currentYearIdx);
+    
+    // Rate Determination
+    const previousRate = m > 0 ? getRateForMonth(m - 1, mortgage.rates) : initialRate;
+    const currentRate = getRateForMonth(m, mortgage.rates);
     const monthlyRate = currentRate / 100 / 12;
 
     // Capture state at start of month
     const principalStart = currentPrincipal;
-    // const installmentCurrent = currentInstallment; // We update this below before logging
 
     // --- 1. Income ---
     let monthlyBase = 0;
@@ -171,12 +179,16 @@ export const runSimulation = (
     const installmentBeforeUpdate = currentInstallment;
 
     // A. Baseline (Shadow) Mortgage Update
-    // We update this regardless to track what the "Standard" installment would be
     if (baselinePrincipal > 0) {
-        if (monthInYear === 0 && m > 0) {
-            const blInst = calculatePMT(baselinePrincipal, currentRate, monthsRemaining);
+        // Check for Rate Change in Baseline (can happen any month now)
+        const blPrevRate = m > 0 ? getRateForMonth(m - 1, mortgage.rates) : initialRate;
+        const blCurrRate = getRateForMonth(m, mortgage.rates);
+        
+        if (blCurrRate !== blPrevRate && m > 0) {
+            const blInst = calculatePMT(baselinePrincipal, blCurrRate, monthsRemaining);
             baselineInstallment = blInst;
         }
+
         const blInterest = baselinePrincipal * monthlyRate;
         const blPayment = Math.min(baselineInstallment, baselinePrincipal + blInterest);
         const blPrincipalPaid = blPayment - blInterest;
@@ -188,14 +200,17 @@ export const runSimulation = (
     if (currentPrincipal > 0) {
         interestPayment = currentPrincipal * monthlyRate;
         
-        // Rate Change Adjustment
-        if (monthInYear === 0 && m > 0) {
+        // Rate Change Adjustment - Triggers when rate differs from previous month
+        if (currentRate !== previousRate && m > 0) {
            const newInstallment = calculatePMT(currentPrincipal, currentRate, monthsRemaining);
-           if (newInstallment < initialInstallment * 0.5 && currentPrincipal > initialInstallment) {
-                currentInstallment = Math.min(initialInstallment, currentPrincipal + interestPayment);
-           } else {
-                currentInstallment = newInstallment; 
-           }
+           
+           // Safety check: if installment drops significantly due to principal reduction but rate went UP, we usually keep it?
+           // Actually, standard bank logic: Rate changes -> Recalculate PMT based on current Principal and Remaining Term.
+           
+           // However, if we have been paying EXTRA, the principal is lower. 
+           // Some banks lower the installment automatically (floating).
+           currentInstallment = newInstallment;
+
            // Use the shadow baseline installment for comparison
            events.push(`Rate Change: ${currentRate}% (Std: ${formatMoney(baselineInstallment)} vs Act: ${formatMoney(currentInstallment)})`);
         }

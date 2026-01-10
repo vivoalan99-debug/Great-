@@ -17,6 +17,7 @@ import { InterestSavedChart } from './components/InterestSavedChart';
 import { MortgageAmortizationChart } from './components/MortgageAmortizationChart';
 import { YearlySummaryTable } from './components/YearlySummaryTable';
 import { DepositoImpactAnalysis } from './components/DepositoImpactAnalysis';
+import { MortgageRateScheduler } from './components/MortgageRateScheduler';
 import { Card, SummaryCard } from './components/ui/Card';
 import { formatMoney } from './services/mathUtils';
 import { ScenarioType } from './types';
@@ -460,7 +461,7 @@ export default function App() {
                                        onChange={(e) => setMortgage({...mortgage, extraPaymentMinMultiple: parseInt(e.target.value)})}
                                    />
                                </div>
-                               <div className="flex items-center gap-2 pt-2">
+                               <div className="flex items-center gap-2 pt-2 pb-2">
                                    <input 
                                        type="checkbox" 
                                        checked={mortgage.useDeposito}
@@ -468,6 +469,10 @@ export default function App() {
                                        className="w-4 h-4 text-blue-600 rounded"
                                    />
                                    <label className="text-sm text-slate-700">Park Extra Payment in Deposito (6%)</label>
+                               </div>
+
+                               <div className="pt-2 border-t border-slate-100">
+                                    <MortgageRateScheduler />
                                </div>
                            </div>
                        </Card>

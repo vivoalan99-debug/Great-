@@ -7,6 +7,40 @@ import { useStore } from '../store/useStore';
 import { formatMoney } from '../services/mathUtils';
 import { Card } from './ui/Card';
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-xl text-xs min-w-[200px] z-50">
+        <p className="font-bold text-slate-800 mb-2 border-b border-slate-100 pb-1">{label}</p>
+        <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-4">
+                 <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                    <span className="text-slate-500">Bucket Balance</span>
+                 </div>
+                 <span className="font-mono font-bold text-slate-700">{formatMoney(data.extraPaymentBucket)}</span>
+            </div>
+             <div className="flex items-center justify-between gap-4">
+                 <div className="flex items-center gap-1.5">
+                    <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                    <span className="text-slate-500">Total Interest</span>
+                 </div>
+                 <span className="font-mono font-bold text-amber-600">{formatMoney(data.cumulativeDepositoInterest)}</span>
+            </div>
+            {data.depositoInterestEarned > 0 && (
+                <div className="flex items-center justify-between gap-4 pt-1 border-t border-slate-50 mt-1">
+                    <span className="text-slate-400 italic">Monthly Yield</span>
+                    <span className="font-mono font-medium text-emerald-600">+{formatMoney(data.depositoInterestEarned)}</span>
+                </div>
+            )}
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 export const DepositoGrowthChart = () => {
   const { simulationResult, mortgage, setMortgage } = useStore();
   
@@ -92,14 +126,7 @@ export const DepositoGrowthChart = () => {
                 hide={!mortgage.useDeposito}
                 domain={['auto', 'auto']}
             />
-            <Tooltip 
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                formatter={(value: number, name: string) => [
-                    formatMoney(value), 
-                    name === 'cumulativeDepositoInterest' ? 'Total Interest Earned' : 'Extra Payment Bucket'
-                ]}
-                labelStyle={{ fontWeight: 'bold', color: '#64748b', marginBottom: '0.5rem' }}
-            />
+            <Tooltip content={<CustomTooltip />} />
             <Legend iconType="circle" fontSize={10} wrapperStyle={{ paddingTop: '10px' }}/>
             
             <Area 

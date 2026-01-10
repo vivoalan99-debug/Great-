@@ -1,13 +1,6 @@
 export const APP_NAME = "FinSim";
 
-// Interest Rate Schedule based on loan year (1-based)
-export const INTEREST_SCHEDULE = [
-  { startYear: 1, endYear: 3, rate: 3.65 },
-  { startYear: 4, endYear: 6, rate: 7.65 },
-  { startYear: 7, endYear: 10, rate: 9.65 },
-  { startYear: 11, endYear: 20, rate: 10.65 },
-  { startYear: 21, endYear: 99, rate: 12.00 } // Fallback
-];
+// Deprecated: INTEREST_SCHEDULE is now part of MortgageConfig.rates
 
 export const DEPOSITO_RATE = 6.0; // 6% annual
 export const BPJS_GROWTH_RATE = 5.7 / 12; // Monthly growth
@@ -35,7 +28,13 @@ export const DEFAULT_MORTGAGE = {
   tenureYears: 15,
   penaltyPercent: 1.0,
   extraPaymentMinMultiple: 6,
-  useDeposito: true
+  useDeposito: true,
+  rates: [
+    { id: '1', startMonth: 1, endMonth: 24, rate: 3.65 },
+    { id: '2', startMonth: 25, endMonth: 60, rate: 7.65 },
+    { id: '3', startMonth: 61, endMonth: 120, rate: 9.65 },
+    { id: '4', startMonth: 121, endMonth: 360, rate: 11.00 },
+  ]
 };
 
 export const DEFAULT_MACRO = {
