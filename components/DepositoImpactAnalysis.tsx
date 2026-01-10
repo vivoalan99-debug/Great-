@@ -6,21 +6,23 @@ import { Card } from './ui/Card';
 import { TrendingUp, Wallet, Landmark, CheckCircle2 } from 'lucide-react';
 
 export const DepositoImpactAnalysis = () => {
-    const { expenses, income, mortgage, macro, scenario } = useStore();
+    const { expenses, income, mortgage, macro, scenario, riskSettings } = useStore();
 
     const comparison = useMemo(() => {
         // 1. Scenario Without Deposito (Idle Cash)
         const simCash = runSimulation(
             expenses, income, 
             { ...mortgage, useDeposito: false }, 
-            macro, scenario
+            macro, scenario,
+            riskSettings
         );
 
         // 2. Scenario With Deposito (High Yield)
         const simDeposito = runSimulation(
             expenses, income, 
             { ...mortgage, useDeposito: true }, 
-            macro, scenario
+            macro, scenario,
+            riskSettings
         );
 
         const getStats = (sim: any) => {
@@ -48,7 +50,7 @@ export const DepositoImpactAnalysis = () => {
             cash: getStats(simCash),
             deposito: getStats(simDeposito)
         };
-    }, [expenses, income, mortgage, macro, scenario]);
+    }, [expenses, income, mortgage, macro, scenario, riskSettings]);
 
     const { cash, deposito } = comparison;
     

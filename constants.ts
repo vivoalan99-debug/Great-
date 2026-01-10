@@ -4,7 +4,6 @@ export const APP_NAME = "FinSim";
 
 export const DEPOSITO_RATE = 6.0; // 6% annual
 export const BPJS_GROWTH_RATE = 5.7 / 12; // Monthly growth
-export const UNEMPLOYMENT_START_MONTH = 18; // Default scenario: Unemployed after 1.5 years
 
 // Default Initial Data
 export const DEFAULT_EXPENSES = [
@@ -35,6 +34,13 @@ export const DEFAULT_MORTGAGE = {
     { id: '3', startMonth: 61, endMonth: 120, rate: 9.65 },
     { id: '4', startMonth: 121, endMonth: 360, rate: 11.00 },
   ]
+};
+
+// Default Risk Dates (e.g., Job loss in month 18, Notification in month 15)
+// We calculate relative to a fixed start date for the default to work
+export const DEFAULT_RISK_SETTINGS = {
+  jobLossDate: '2027-06-01', // Approx 1.5 years from start
+  notificationDate: '2027-03-01' // 3 months notice
 };
 
 export const DEFAULT_MACRO = {

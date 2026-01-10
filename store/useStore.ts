@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { Expense, IncomeConfig, MortgageConfig, ScenarioType, SimulationResult, MacroConfig } from '../types';
-import { DEFAULT_EXPENSES, DEFAULT_INCOME, DEFAULT_MORTGAGE, DEFAULT_MACRO } from '../constants';
+import { Expense, IncomeConfig, MortgageConfig, ScenarioType, SimulationResult, MacroConfig, RiskSettings } from '../types';
+import { DEFAULT_EXPENSES, DEFAULT_INCOME, DEFAULT_MORTGAGE, DEFAULT_MACRO, DEFAULT_RISK_SETTINGS } from '../constants';
 import { runSimulation } from '../services/engine';
 
 interface AppState {
@@ -9,6 +9,7 @@ interface AppState {
   mortgage: MortgageConfig;
   macro: MacroConfig;
   scenario: ScenarioType;
+  riskSettings: RiskSettings;
   simulationResult: SimulationResult | null;
 
   setExpenses: (expenses: Expense[]) => void;
@@ -17,6 +18,7 @@ interface AppState {
   setMortgage: (mortgage: MortgageConfig) => void;
   setMacro: (macro: MacroConfig) => void;
   setScenario: (scenario: ScenarioType) => void;
+  setRiskSettings: (settings: RiskSettings) => void;
   run: () => void;
 }
 
@@ -26,6 +28,7 @@ export const useStore = create<AppState>((set, get) => ({
   mortgage: DEFAULT_MORTGAGE,
   macro: DEFAULT_MACRO,
   scenario: ScenarioType.NORMAL,
+  riskSettings: DEFAULT_RISK_SETTINGS,
   simulationResult: null,
 
   setExpenses: (expenses) => {
@@ -60,9 +63,14 @@ export const useStore = create<AppState>((set, get) => ({
     get().run();
   },
 
+  setRiskSettings: (riskSettings) => {
+    set({ riskSettings });
+    get().run();
+  },
+
   run: () => {
-    const { expenses, income, mortgage, scenario, macro } = get();
-    const result = runSimulation(expenses, income, mortgage, macro, scenario);
+    const { expenses, income, mortgage, scenario, macro, riskSettings } = get();
+    const result = runSimulation(expenses, income, mortgage, macro, scenario, riskSettings);
     set({ simulationResult: result });
   }
 }));

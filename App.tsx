@@ -3,7 +3,7 @@ import { useStore } from './store/useStore';
 import { 
   LayoutDashboard, Wallet, Home, PieChart, 
   Settings, Menu, X, AlertTriangle, CheckCircle,
-  ShieldAlert, ShieldCheck, PiggyBank, TrendingDown, Download, FileText, Info
+  ShieldAlert, ShieldCheck, PiggyBank, TrendingDown, Download, FileText, Info, CalendarClock, Siren
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -41,7 +41,7 @@ export default function App() {
   const { 
       run, simulationResult, scenario, setScenario, 
       income, setIncome, mortgage, setMortgage,
-      macro, setMacro 
+      macro, setMacro, riskSettings, setRiskSettings
   } = useStore();
   
   const [collapsed, setCollapsed] = useState(false);
@@ -196,6 +196,20 @@ export default function App() {
   };
   
   const riskConfig = getRiskConfig(summary.riskLevel);
+  
+  const riskBadge = (
+      <div className="group relative ml-auto flex items-center cursor-help">
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${riskConfig.bg} ${riskConfig.text} border-current opacity-90`}>
+              {summary.riskLevel}
+          </span>
+          {/* Tooltip */}
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2.5 bg-slate-800 text-white text-[10px] font-medium rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 text-center leading-snug">
+              {summary.riskReason}
+              {/* Arrow */}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-slate-800 rotate-45"></div>
+          </div>
+      </div>
+  );
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -215,20 +229,55 @@ export default function App() {
             <SidebarItem icon={Home} label="Mortgage" active={activeTab === 'mortgage'} onClick={() => setActiveTab('mortgage')} collapsed={collapsed} />
             <SidebarItem icon={PieChart} label="Simulation" active={activeTab === 'simulation'} onClick={() => setActiveTab('simulation')} collapsed={collapsed} />
         </div>
-        <div className="p-4 border-t border-slate-100 shrink-0">
+        
+        {/* Scenario Selector */}
+        <div className="p-4 border-t border-slate-100 shrink-0 bg-slate-50">
              <div className={`overflow-hidden transition-all duration-300 ${collapsed ? 'h-0 opacity-0' : 'h-auto opacity-100'}`}>
-               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                 <p className="text-xs font-semibold text-slate-500 mb-2">SCENARIO</p>
+               <div className="mb-4">
+                 <p className="text-xs font-semibold text-slate-500 mb-2">SIMULATION SCENARIO</p>
                  <select 
-                   className="w-full text-sm p-1.5 rounded border border-slate-300 bg-white"
+                   className="w-full text-sm p-1.5 rounded border border-slate-300 bg-white shadow-sm focus:ring-2 focus:ring-blue-100"
                    value={scenario}
                    onChange={(e) => setScenario(e.target.value as ScenarioType)}
                  >
-                    <option value={ScenarioType.NORMAL}>Normal</option>
-                    <option value={ScenarioType.UNEMPLOYED}>Unemployed (18mo)</option>
-                    <option value={ScenarioType.WORST_CASE}>Worst Case</option>
+                    <option value={ScenarioType.NORMAL}>Normal (Steady Job)</option>
+                    <option value={ScenarioType.UNEMPLOYED}>Job Loss (Unemployed)</option>
+                    <option value={ScenarioType.WORST_CASE}>Worst Case (Recession)</option>
                  </select>
                </div>
+               
+               {/* Scenario Specific Dates */}
+               {scenario !== ScenarioType.NORMAL && (
+                 <div className="space-y-3 pt-3 border-t border-slate-200 animate-in fade-in slide-in-from-top-2">
+                     <div>
+                        <div className="flex items-center gap-1 mb-1">
+                            <CalendarClock size={12} className="text-slate-400" />
+                            <label className="text-xs font-bold text-slate-600">Expected Job Loss</label>
+                        </div>
+                        <input 
+                            type="date" 
+                            className="w-full text-xs p-1.5 rounded border border-slate-300 bg-white"
+                            value={riskSettings.jobLossDate}
+                            onChange={(e) => setRiskSettings({...riskSettings, jobLossDate: e.target.value})}
+                        />
+                     </div>
+                     <div>
+                        <div className="flex items-center gap-1 mb-1">
+                            <Siren size={12} className="text-slate-400" />
+                            <label className="text-xs font-bold text-slate-600">Notification Date</label>
+                        </div>
+                        <input 
+                            type="date" 
+                            className="w-full text-xs p-1.5 rounded border border-slate-300 bg-white"
+                            value={riskSettings.notificationDate}
+                            onChange={(e) => setRiskSettings({...riskSettings, notificationDate: e.target.value})}
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1 leading-tight">
+                            Simulation enters "Survival Mode" (Cost Cutting) from this date.
+                        </p>
+                     </div>
+                 </div>
+               )}
              </div>
         </div>
       </div>
@@ -276,14 +325,28 @@ export default function App() {
             
             {/* Summary Cards Row */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <SummaryCard 
-                  label="Runway (Inc. Mortgage)" 
-                  value={`${summary.liquidityRunwayMonths.toFixed(1)} Mo`} 
-                  subtext={`Min: ${summary.lowestLiquidityMonths.toFixed(1)} Mo`}
-                  color={riskConfig.color}
-                  icon={riskConfig.icon}
-                  className={riskConfig.border}
-                />
+                {scenario === ScenarioType.NORMAL ? (
+                    <SummaryCard 
+                        label="Runway (Inc. Mortgage)" 
+                        value={`${summary.liquidityRunwayMonths.toFixed(1)} Mo`} 
+                        subtext={`Min: ${summary.lowestLiquidityMonths.toFixed(1)} Mo`}
+                        color={riskConfig.color}
+                        icon={riskConfig.icon}
+                        className={riskConfig.border}
+                        badge={riskBadge}
+                    />
+                ) : (
+                     <SummaryCard 
+                        label="Job Search Runway" 
+                        value={summary.maxJobSearchMonths !== null ? `${summary.maxJobSearchMonths} Mo` : 'Safe'} 
+                        subtext={summary.bankruptcyDate ? `Insolvent: ${summary.bankruptcyDate}` : "Runway exceeds 20y"}
+                        color={riskConfig.color}
+                        icon={CalendarClock}
+                        className={riskConfig.border}
+                        badge={riskBadge}
+                    />
+                )}
+
                 <SummaryCard 
                   label="Buffer Full" 
                   value={summary.monthsToFullBuffer ? `Month ${summary.monthsToFullBuffer}` : 'Never'} 

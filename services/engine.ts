@@ -1,6 +1,6 @@
 import { 
   Expense, IncomeConfig, MortgageConfig, MacroConfig, ScenarioType, 
-  SimulationResult, MonthLog, YearLog, InterestRateTier
+  SimulationResult, MonthLog, YearLog, InterestRateTier, RiskSettings
 } from '../types';
 import { DEPOSITO_RATE, BPJS_GROWTH_RATE } from '../constants';
 import { calculatePMT } from './mathUtils';
@@ -20,12 +20,22 @@ const getRateForMonth = (monthIndex: number, rates: InterestRateTier[]): number 
   return tier.rate;
 };
 
+// Helper: Calculate month difference between two ISO strings with safety check
+const getMonthDiff = (startDateStr: string, targetDateStr: string) => {
+    if (!startDateStr || !targetDateStr) return -1;
+    const start = new Date(startDateStr);
+    const target = new Date(targetDateStr);
+    if (isNaN(start.getTime()) || isNaN(target.getTime())) return -1;
+    return (target.getFullYear() - start.getFullYear()) * 12 + (target.getMonth() - start.getMonth());
+};
+
 export const runSimulation = (
   expenses: Expense[],
   income: IncomeConfig,
   mortgage: MortgageConfig,
   macro: MacroConfig,
-  scenario: ScenarioType
+  scenario: ScenarioType,
+  riskSettings: RiskSettings
 ): SimulationResult => {
   
   const startDate = new Date(mortgage.startDate);
@@ -33,21 +43,27 @@ export const runSimulation = (
   const logs: MonthLog[] = [];
   const yearLogs: YearLog[] = [];
   
+  // -- Determine Critical Risk Indices --
+  const jobLossMonthIndex = scenario !== ScenarioType.NORMAL 
+        ? getMonthDiff(mortgage.startDate, riskSettings.jobLossDate)
+        : -1;
+  
+  const notificationMonthIndex = scenario !== ScenarioType.NORMAL 
+        ? getMonthDiff(mortgage.startDate, riskSettings.notificationDate)
+        : -1;
+
   // -- Initial State --
   let currentPrincipal = mortgage.principal;
   let monthsRemaining = mortgage.tenureYears * 12;
   
-  // -- Baseline State (Shadow tracking for standard amortization without extra payments) --
+  // -- Baseline State (Shadow tracking) --
   let baselinePrincipal = mortgage.principal;
   let baselineInstallment = 0; 
 
-  // Calculate Initial Installment (Month 1 Rate)
   const initialRate = getRateForMonth(0, mortgage.rates);
   let currentInstallment = calculatePMT(currentPrincipal, initialRate, monthsRemaining);
-  
-  // Sync baseline initially
   baselineInstallment = currentInstallment; 
-  const initialInstallment = currentInstallment; // Used for buffers
+  const initialInstallment = currentInstallment;
 
   let bufferBalance = 0;
   let emergencyBalance = 0;
@@ -59,7 +75,18 @@ export const runSimulation = (
   let accumulatedInterestSaved = 0;
   let accumulatedDepositoInterest = 0;
 
+  // Initialize Employment Status
+  // If job loss date is invalid (-1) or in past, and we are in a risk scenario, start as unemployed
   let isEmployed = true;
+  if (scenario !== ScenarioType.NORMAL && jobLossMonthIndex < 0) {
+      isEmployed = false;
+  }
+
+  // If notification is invalid (-1) but job loss is valid, assume we are notified immediately (Survival Mode)
+  let inSurvivalMode = false;
+  if (scenario !== ScenarioType.NORMAL && notificationMonthIndex < 0 && jobLossMonthIndex >= 0) {
+      inSurvivalMode = true;
+  }
 
   // Track logic
   let bufferFullMonth: number | null = null;
@@ -68,93 +95,98 @@ export const runSimulation = (
   
   // Risk Analysis Trackers
   let lowestLiquidity = 999;
-  let lowestLiquidityMonth = '';
   let hasBankruptcy = false;
-  let bankruptcyDate = '';
+  let bankruptcyMonthIndex: number | null = null;
+  let bankruptcyDateStr = '';
   
-  // We'll track the "worst" risk level encountered
-  let maxRiskSeverity = 0; // 0=Low, 1=Med, 2=High
+  let maxRiskSeverity = 0;
   let maxRiskReason = 'Financial plan is robust.';
 
-  // Unemployment Trigger
-  const unemploymentStartMonth = scenario === ScenarioType.UNEMPLOYED ? 18 : 
-                                 scenario === ScenarioType.WORST_CASE ? 6 : 9999;
-
   for (let m = 0; m < maxMonths; m++) {
-    // 0. Pre-Check: Auto-Payoff for Micro Balances (Dust)
-    if (currentPrincipal > 0 && currentPrincipal < 10000) {
-        currentPrincipal = 0;
-    }
-
-    if (currentPrincipal <= 0 && payoffDate === null) {
-      // Mortgage effectively paid
-      currentPrincipal = 0;
-      currentInstallment = 0;
-      payoffDate = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1).toISOString();
-    }
-
     const currentYearIdx = Math.floor(m / 12);
     const monthInYear = m % 12;
+    // Calculate date safely
+    const currentMonthDate = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1);
+    const dateStr = !isNaN(currentMonthDate.getTime()) 
+        ? currentMonthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        : `Month ${m}`;
     
+    // Auto-Payoff for Dust
+    if (currentPrincipal > 0 && currentPrincipal < 10000) currentPrincipal = 0;
+    if (currentPrincipal <= 0 && payoffDate === null) {
+      currentPrincipal = 0;
+      currentInstallment = 0;
+      payoffDate = currentMonthDate.toISOString();
+    }
+
     // Rate Determination
     const previousRate = m > 0 ? getRateForMonth(m - 1, mortgage.rates) : initialRate;
     const currentRate = getRateForMonth(m, mortgage.rates);
     const monthlyRate = currentRate / 100 / 12;
-
-    // Capture state at start of month
     const principalStart = currentPrincipal;
+
+    // --- 0. Status Check (Employment & Knowledge) ---
+    const events: string[] = [];
+    
+    // Start "Hoarding" / Survival Mode if we know we are losing the job
+    if (jobLossMonthIndex >= 0 && m >= notificationMonthIndex && m < jobLossMonthIndex && notificationMonthIndex !== -1) {
+        if (!inSurvivalMode) {
+            inSurvivalMode = true;
+            events.push('Notice Received: Survival Mode');
+        }
+    }
+
+    // Job Loss Event
+    if (m === jobLossMonthIndex) {
+        isEmployed = false;
+        events.push('Job Loss Event');
+    }
 
     // --- 1. Income ---
     let monthlyBase = 0;
     let monthlyBonus = 0;
-    const events: string[] = [];
 
-    // Check Employment
-    if (m === unemploymentStartMonth) {
-        isEmployed = false;
-        events.push('Job Loss');
-    }
-
-    // Salary Growth (Annual)
+    // Salary Growth
     const salaryMultiplier = Math.pow(1 + income.annualIncreasePercent / 100, currentYearIdx);
     const currentBaseSalary = income.baseSalary * salaryMultiplier;
 
     if (isEmployed) {
-        // Last salary check
-        if (m < unemploymentStartMonth) {
-             monthlyBase = currentBaseSalary;
-             // THR
-             if (income.thrMonths.includes(monthInYear)) {
-                 monthlyBonus += currentBaseSalary;
-                 events.push('THR Received');
-             }
-             // Compensation
-             if (income.compensationMonths.includes(monthInYear)) {
-                 monthlyBonus += currentBaseSalary;
-                 events.push('Compensation Received');
-             }
-             // BPJS Growth
-             bpjs += bpjs * (BPJS_GROWTH_RATE / 100) + (currentBaseSalary * 0.057);
-        } else if (m === unemploymentStartMonth) {
-            // Final salary + Severance/Compensation
-            monthlyBase = currentBaseSalary; // Final month salary
-            monthlyBonus += currentBaseSalary; // Severance (simplified as 1x)
-            events.push('Severance Paid');
-        }
+         monthlyBase = currentBaseSalary;
+         
+         // THR
+         if (income.thrMonths.includes(monthInYear)) {
+             monthlyBonus += currentBaseSalary;
+             events.push('THR');
+         }
+         // Compensation
+         if (income.compensationMonths.includes(monthInYear)) {
+             monthlyBonus += currentBaseSalary;
+             events.push('Compensation');
+         }
+         // BPJS Growth
+         bpjs += bpjs * (BPJS_GROWTH_RATE / 100) + (currentBaseSalary * 0.057);
     } else {
-        // Unemployed
+        // UNEMPLOYED
         monthlyBase = 0;
-        // BPJS Claim (1 month after unemployment)
-        if (m === unemploymentStartMonth + 1 && bpjs > 0) {
+
+        // Severance Payout (On the month of job loss)
+        if (m === jobLossMonthIndex) {
+            const severance = currentBaseSalary * 1.0; 
+            monthlyBonus += severance;
+            events.push(`Severance Paid (+${formatMoney(severance)})`);
+        }
+
+        // BPJS Claim (1 Month AFTER job loss)
+        if (m === jobLossMonthIndex + 1 && bpjs > 0) {
             monthlyBonus += bpjs;
+            events.push(`BPJS Liquidated (+${formatMoney(bpjs)})`);
             bpjs = 0;
-            events.push('BPJS Claimed');
         }
     }
 
     const totalIncome = monthlyBase + monthlyBonus;
 
-    // --- 2. Expenses with Inflation Impact ---
+    // --- 2. Expenses ---
     let mandExpenses = 0;
     let discExpenses = 0;
 
@@ -165,128 +197,113 @@ export const runSimulation = (
         else discExpenses += itemInflated;
     });
 
-    if (!isEmployed && scenario === ScenarioType.WORST_CASE) {
-        discExpenses *= 0.5;
-        if (!events.includes('Expenses Cut')) events.push('Expenses Cut');
+    // AUSTERITY LOGIC
+    if (!isEmployed || inSurvivalMode) {
+        const multiplier = scenario === ScenarioType.WORST_CASE ? 0 : 0.5;
+        discExpenses *= multiplier;
+        if (!events.includes('Austerity')) events.push('Austerity');
     }
 
     const totalExpenses = mandExpenses + discExpenses;
 
-    // --- 3. Mortgage Payment ---
+    // --- 3. Mortgage ---
     let interestPayment = 0;
     let principalPayment = 0;
     let actualPayment = 0;
     const installmentBeforeUpdate = currentInstallment;
 
-    // A. Baseline (Shadow) Mortgage Update
+    // A. Baseline Shadow
     if (baselinePrincipal > 0) {
-        // Check for Rate Change in Baseline (can happen any month now)
         const blPrevRate = m > 0 ? getRateForMonth(m - 1, mortgage.rates) : initialRate;
         const blCurrRate = getRateForMonth(m, mortgage.rates);
-        
         if (blCurrRate !== blPrevRate && m > 0) {
-            const blInst = calculatePMT(baselinePrincipal, blCurrRate, monthsRemaining);
-            baselineInstallment = blInst;
+            baselineInstallment = calculatePMT(baselinePrincipal, blCurrRate, monthsRemaining);
         }
-
         const blInterest = baselinePrincipal * monthlyRate;
         const blPayment = Math.min(baselineInstallment, baselinePrincipal + blInterest);
-        const blPrincipalPaid = blPayment - blInterest;
-        baselinePrincipal -= blPrincipalPaid;
-        if (baselinePrincipal < 0) baselinePrincipal = 0;
+        baselinePrincipal -= (blPayment - blInterest);
     }
 
-    // B. Actual Mortgage Update
+    // B. Actual
     if (currentPrincipal > 0) {
         interestPayment = currentPrincipal * monthlyRate;
         
-        // Rate Change Adjustment - Triggers when rate differs from previous month
         if (currentRate !== previousRate && m > 0) {
-           const newInstallment = calculatePMT(currentPrincipal, currentRate, monthsRemaining);
-           
-           // Safety check: if installment drops significantly due to principal reduction but rate went UP, we usually keep it?
-           // Actually, standard bank logic: Rate changes -> Recalculate PMT based on current Principal and Remaining Term.
-           
-           // However, if we have been paying EXTRA, the principal is lower. 
-           // Some banks lower the installment automatically (floating).
-           currentInstallment = newInstallment;
-
-           // Use the shadow baseline installment for comparison
-           events.push(`Rate Change: ${currentRate}% (Std: ${formatMoney(baselineInstallment)} vs Act: ${formatMoney(currentInstallment)})`);
+           currentInstallment = calculatePMT(currentPrincipal, currentRate, monthsRemaining);
+           events.push(`Rate: ${currentRate}%`);
         }
 
         actualPayment = Math.min(currentInstallment, currentPrincipal + interestPayment);
         principalPayment = actualPayment - interestPayment;
-        if (principalPayment < 0) principalPayment = 0;
     }
 
-    // Update Principal (Regular Payment)
     currentPrincipal -= principalPayment;
     accumulatedInterestPaid += interestPayment;
-    
-    // Capture principal after regular payment but before extra
     const principalAfterRegular = currentPrincipal;
 
-    // --- 4. Targets ---
+    // --- 4. Net Flow ---
+    let netFlow = totalIncome - totalExpenses - actualPayment;
+    let cashSurplus = netFlow;
+
+    // --- 5. Allocation / Withdrawal ---
+    // Targets
     const M_avg = initialInstallment;
     const E = totalExpenses; 
     const bufferTarget = 3 * E + 1 * M_avg;
     const emergencyTarget = 6 * E + 6 * M_avg;
 
-    // --- 5. Net Flow & Allocation ---
-    let netFlow = totalIncome - totalExpenses - actualPayment;
-    let cashSurplus = netFlow;
-
     if (cashSurplus > 0) {
+        // Accumulation Priority: Buffer -> Emergency -> Deposito
         if (bufferBalance < bufferTarget) {
-            const needed = bufferTarget - bufferBalance;
-            const flow = Math.min(cashSurplus, needed);
+            const flow = Math.min(cashSurplus, bufferTarget - bufferBalance);
             bufferBalance += flow;
             cashSurplus -= flow;
         }
         if (bufferBalance >= bufferTarget - 1 && emergencyBalance < emergencyTarget) {
-            const needed = emergencyTarget - emergencyBalance;
-            const flow = Math.min(cashSurplus, needed);
+            const flow = Math.min(cashSurplus, emergencyTarget - emergencyBalance);
             emergencyBalance += flow;
             cashSurplus -= flow;
         }
-        if (bufferBalance >= bufferTarget - 1 && emergencyBalance >= emergencyTarget - 1) {
+        if (cashSurplus > 0) {
             extraBucket += cashSurplus;
             cashSurplus = 0;
         }
     } else {
+        // Deficit / Withdrawal Priority: Extra Bucket -> Deposito -> Emergency -> Buffer
         let deficit = Math.abs(cashSurplus);
         
+        const draw = (amount: number, source: number): [number, number] => {
+            const taken = Math.min(amount, source);
+            return [taken, source - taken];
+        };
+
         if (extraBucket > 0) {
-            const taken = Math.min(extraBucket, deficit);
-            extraBucket -= taken;
-            deficit -= taken;
+            const [taken, rem] = draw(deficit, extraBucket);
+            extraBucket = rem; deficit -= taken;
         }
         if (deficit > 0 && deposito > 0) {
-             const taken = Math.min(deposito, deficit);
-             deposito -= taken;
-             deficit -= taken;
+             const [taken, rem] = draw(deficit, deposito);
+             deposito = rem; deficit -= taken;
         }
         if (deficit > 0 && emergencyBalance > 0) {
-            const taken = Math.min(emergencyBalance, deficit);
-            emergencyBalance -= taken;
-            deficit -= taken;
+            const [taken, rem] = draw(deficit, emergencyBalance);
+            emergencyBalance = rem; deficit -= taken;
         }
         if (deficit > 0 && bufferBalance > 0) {
-             const taken = Math.min(bufferBalance, deficit);
-             bufferBalance -= taken;
-             deficit -= taken;
+             const [taken, rem] = draw(deficit, bufferBalance);
+             bufferBalance = rem; deficit -= taken;
         }
-        if (deficit > 0) {
-            events.push("CASHFLOW DEFICIT");
+        
+        if (deficit > 0.01) {
+            events.push("INSOLVENT");
             if (!hasBankruptcy) {
                 hasBankruptcy = true;
-                bankruptcyDate = new Date(2026, m, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                bankruptcyMonthIndex = m;
+                bankruptcyDateStr = dateStr;
             }
         }
     }
 
-    // Targets Met Logging
     if (bufferFullMonth === null && bufferBalance >= bufferTarget - 100) bufferFullMonth = m;
     if (emergencyFullMonth === null && emergencyBalance >= emergencyTarget - 100) emergencyFullMonth = m;
 
@@ -298,147 +315,81 @@ export const runSimulation = (
         accumulatedDepositoInterest += monthlyDepositoInterest;
     }
 
-    // --- 7. Extra Payment (Scheduled) & Annual Smart Payoff ---
+    // --- 7. Extra Payment Logic ---
     let extraPaymentMade = 0;
-
-    if (m > 0 && m % 12 === 0 && currentPrincipal > 0) {
-        // A. Regular Extra Payment
+    if (m > 0 && m % 12 === 0 && currentPrincipal > 0 && isEmployed && !inSurvivalMode) {
         const minExtra = mortgage.extraPaymentMinMultiple * currentInstallment;
-        let availableExtra = extraBucket;
-        let amountToPay = 0;
-        
-        if (availableExtra >= minExtra) {
-            amountToPay = availableExtra;
-        } else if (availableExtra >= currentPrincipal) {
-             amountToPay = availableExtra;
-        }
+        if (extraBucket >= minExtra) {
+            const amountToPay = extraBucket; 
+            const penaltyAmt = amountToPay * (mortgage.penaltyPercent / 100);
+            const finalRed = Math.min(amountToPay - penaltyAmt, currentPrincipal);
+            
+            const instBefore = currentInstallment;
+            currentPrincipal -= finalRed;
+            extraBucket -= amountToPay;
+            extraPaymentMade = amountToPay;
 
-        if (amountToPay > 0) {
-             const penaltyAmt = amountToPay * (mortgage.penaltyPercent / 100);
-             const effectivePrincipalReduction = amountToPay - penaltyAmt;
-             const finalRed = Math.min(effectivePrincipalReduction, currentPrincipal);
-             const instBefore = currentInstallment;
-             
-             currentPrincipal -= finalRed;
-             extraBucket -= amountToPay; 
-             extraPaymentMade = amountToPay;
-             
-             // Recalculate Installment
-             const remainingTermMonths = monthsRemaining - 1; // It will be decremented at end of loop, but we calculate new inst for next month
-             let newInst = calculatePMT(currentPrincipal, currentRate, remainingTermMonths);
-             if (newInst > instBefore) newInst = instBefore; 
-             currentInstallment = newInst;
-             
-             const interestSavedThisEvent = Math.max(0, (instBefore - newInst) * remainingTermMonths - finalRed);
-             accumulatedInterestSaved += interestSavedThisEvent;
+            let newInst = calculatePMT(currentPrincipal, currentRate, monthsRemaining - 1);
+            if (newInst > instBefore) newInst = instBefore; 
+            currentInstallment = newInst;
 
-             yearLogs.push({
-                 year: currentYearIdx, 
-                 extraPaymentPaid: amountToPay,
-                 penaltyPaid: penaltyAmt,
-                 principalReduced: finalRed,
-                 installmentBefore: instBefore,
-                 installmentAfter: newInst,
-                 interestSaved: interestSavedThisEvent
-             });
-             events.push(`Extra Payment: ${formatMoney(amountToPay)} (Inst: ${formatMoney(currentInstallment)})`);
-        }
+            const intSaved = Math.max(0, (instBefore - newInst) * (monthsRemaining - 1) - finalRed);
+            accumulatedInterestSaved += intSaved;
 
-        // B. Smart Payoff Check (Annual Rule)
-        if (currentPrincipal > 0 && emergencyBalance > 0) {
-             const smartPayoffThreshold = emergencyBalance / 3;
-             
-             if (currentPrincipal <= smartPayoffThreshold) {
-                 const penaltyAmt = currentPrincipal * (mortgage.penaltyPercent / 100);
-                 const totalNeeded = currentPrincipal + penaltyAmt;
-                 
-                 const totalLiquid = extraBucket + deposito + bufferBalance + emergencyBalance;
-                 
-                 if (totalLiquid >= totalNeeded) {
-                     events.push(`Smart Payoff (Emergency Rule)`);
-                     
-                     const projectedTotalFuturePayments = currentInstallment * (monthsRemaining - 1);
-                     const interestSaved = Math.max(0, projectedTotalFuturePayments - currentPrincipal);
-                     accumulatedInterestSaved += interestSaved;
-
-                     // Deduction logic
-                     extraPaymentMade += currentPrincipal; // Roughly tracking amount paid down
-                     currentPrincipal = 0;
-                     currentInstallment = 0; // Mortgage is done
-                     
-                     let remainingCost = totalNeeded;
-                     if (remainingCost > 0) {
-                         if (extraBucket >= remainingCost) { extraBucket -= remainingCost; remainingCost = 0; }
-                         else { remainingCost -= extraBucket; extraBucket = 0; }
-                     }
-                     if (remainingCost > 0) {
-                         if (deposito >= remainingCost) { deposito -= remainingCost; remainingCost = 0; }
-                         else { remainingCost -= deposito; deposito = 0; }
-                     }
-                     if (remainingCost > 0) {
-                         if (bufferBalance >= remainingCost) { bufferBalance -= remainingCost; remainingCost = 0; }
-                         else { remainingCost -= bufferBalance; bufferBalance = 0; }
-                     }
-                     if (remainingCost > 0) {
-                         if (emergencyBalance >= remainingCost) { emergencyBalance -= remainingCost; remainingCost = 0; }
-                         else { remainingCost -= emergencyBalance; emergencyBalance = 0; }
-                     }
-                 }
-             }
+            yearLogs.push({
+                year: currentYearIdx, 
+                extraPaymentPaid: amountToPay,
+                penaltyPaid: penaltyAmt,
+                principalReduced: finalRed,
+                installmentBefore: instBefore,
+                installmentAfter: newInst,
+                interestSaved: intSaved
+            });
+            events.push(`Extra Pmt: ${formatMoney(amountToPay)}`);
         }
     }
 
     monthsRemaining--;
 
-    // --- Risk Analyst (Per Month) ---
+    // --- Risk Analysis ---
     const totalLiquid = bufferBalance + emergencyBalance + extraBucket + deposito;
     const monthlyBurnRate = totalExpenses + (currentPrincipal > 0 ? currentInstallment : 0);
     const liquidityMonths = monthlyBurnRate > 0 ? totalLiquid / monthlyBurnRate : 999;
     
-    const dateStr = new Date(2026, m, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-    
-    // Update global Lowest
-    if (liquidityMonths < lowestLiquidity) {
-        lowestLiquidity = liquidityMonths;
-        lowestLiquidityMonth = dateStr;
+    // Lowest Liquidity Tracking:
+    if (m >= notificationMonthIndex || notificationMonthIndex === -1) {
+        if (liquidityMonths < lowestLiquidity) lowestLiquidity = liquidityMonths;
     }
 
-    // Assess Current Risk Level
+    // Risk Level Classification
     let monthlyRisk: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
     let reason = '';
 
-    if (netFlow < 0 && totalLiquid <= 0 && Math.abs(netFlow) > 0.01) {
+    if (hasBankruptcy) {
         monthlyRisk = 'HIGH';
-        reason = 'Insolvency (Bankruptcy)';
+        reason = `Bankrupt`;
+    } else if (!isEmployed) {
+        if (liquidityMonths < 3) { monthlyRisk = 'HIGH'; reason = 'Runway < 3mo (Unemployed)'; }
+        else if (liquidityMonths < 6) { monthlyRisk = 'MEDIUM'; reason = 'Runway < 6mo (Unemployed)'; }
+    } else if (inSurvivalMode) {
+        if (liquidityMonths < 3) { monthlyRisk = 'HIGH'; reason = 'Critical Pre-loss Runway'; }
+        else { monthlyRisk = 'MEDIUM'; reason = 'Survival Mode (Preparing)'; }
     } else {
-        if (!isEmployed) {
-            if (liquidityMonths < 3) { monthlyRisk = 'HIGH'; reason = 'Runway < 3mo (Unemployed)'; }
-            else if (liquidityMonths < 6) { monthlyRisk = 'MEDIUM'; reason = 'Runway < 6mo (Unemployed)'; }
+        if (netFlow < 0) {
+             if (liquidityMonths < 3) { monthlyRisk = 'HIGH'; reason = 'High Burn Rate & Low Liquidity'; }
+             else if (liquidityMonths < 6) { monthlyRisk = 'MEDIUM'; reason = 'Negative Cashflow'; }
         } else {
-            if (liquidityMonths < 1) { monthlyRisk = 'HIGH'; reason = 'Runway < 1mo (High Fragility)'; }
-            else if (liquidityMonths < 3) { monthlyRisk = 'MEDIUM'; reason = 'Runway < 3mo'; }
-            
-            if (macro.inflationRate > income.annualIncreasePercent + 1) {
-                const monthlyObligations = totalExpenses + (currentPrincipal > 0 ? currentInstallment : 0);
-                const dti = monthlyObligations / totalIncome;
-                
-                if (dti > 0.95) {
-                     monthlyRisk = 'HIGH';
-                     reason = 'Stagflation: Debt+Costs > Income';
-                } else if (monthlyRisk === 'LOW') {
-                    monthlyRisk = 'MEDIUM';
-                    reason = 'High Inflation Erosion';
-                }
-            }
+             if (liquidityMonths < 1 && m > 6) { 
+                 monthlyRisk = 'MEDIUM'; 
+                 reason = 'Fragile (Buffer < 1mo)'; 
+             }
         }
     }
 
     const severity = monthlyRisk === 'HIGH' ? 2 : monthlyRisk === 'MEDIUM' ? 1 : 0;
     if (severity > maxRiskSeverity) {
         maxRiskSeverity = severity;
-        maxRiskReason = reason + ` at ${dateStr}`;
-    } else if (severity === maxRiskSeverity && monthlyRisk === 'HIGH' && hasBankruptcy) {
-         maxRiskReason = `Bankruptcy at ${bankruptcyDate}`;
+        maxRiskReason = reason;
     }
 
     logs.push({
@@ -465,8 +416,6 @@ export const runSimulation = (
         riskLevel: monthlyRisk,
         depositoInterestEarned: monthlyDepositoInterest,
         cumulativeDepositoInterest: accumulatedDepositoInterest,
-        
-        // New Fields
         principalStart,
         principalAfterRegular,
         extraPaymentMade,
@@ -479,22 +428,31 @@ export const runSimulation = (
     }
   }
 
+  // Final Summary Logic
   let finalRiskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
-  
-  if (hasBankruptcy) {
-      finalRiskLevel = 'HIGH';
-      maxRiskReason = `Bankruptcy occurred in ${bankruptcyDate}`;
-  } else if (maxRiskSeverity === 2) {
-      finalRiskLevel = 'HIGH';
-  } else if (maxRiskSeverity === 1) {
-      finalRiskLevel = 'MEDIUM';
+  if (hasBankruptcy) finalRiskLevel = 'HIGH';
+  else if (maxRiskSeverity === 2) finalRiskLevel = 'HIGH';
+  else if (maxRiskSeverity === 1) finalRiskLevel = 'MEDIUM';
+
+  let maxJobSearchMonths: number | null = null;
+  if (jobLossMonthIndex !== -1 && jobLossMonthIndex < maxMonths) {
+      if (hasBankruptcy && bankruptcyMonthIndex !== null) {
+          maxJobSearchMonths = Math.max(0, bankruptcyMonthIndex - jobLossMonthIndex);
+      } else {
+          maxJobSearchMonths = maxMonths - jobLossMonthIndex; 
+      }
   }
 
-  const lastLog = logs[logs.length - 1];
-  const finalLiquid = lastLog.bufferBalance + lastLog.emergencyBalance + lastLog.extraPaymentBucket + lastLog.depositoBalance;
-  const finalBurn = lastLog.totalExpenses + (lastLog.mortgageBalance > 0 ? currentInstallment : 0); 
-  const finalRunway = finalBurn > 0 ? finalLiquid / finalBurn : 0;
   const purchasingPowerLoss = (Math.pow(1 + macro.inflationRate/100, 20) - 1) * 100;
+  
+  let finalReason = maxRiskReason;
+  if (scenario !== ScenarioType.NORMAL && maxJobSearchMonths !== null) {
+      if (hasBankruptcy) {
+          finalReason = `Insolvency ${maxJobSearchMonths} months after job loss.`;
+      } else {
+          finalReason = `Survived >${maxJobSearchMonths} months without job.`;
+      }
+  }
 
   return {
       logs,
@@ -505,11 +463,13 @@ export const runSimulation = (
           mortgagePayoffDate: payoffDate,
           totalInterestPaid: accumulatedInterestPaid,
           totalInterestSaved: accumulatedInterestSaved,
-          liquidityRunwayMonths: finalRunway,
+          liquidityRunwayMonths: logs[logs.length-1].bufferBalance > 0 ? 99 : 0, 
           lowestLiquidityMonths: lowestLiquidity,
           riskLevel: finalRiskLevel,
-          riskReason: maxRiskReason,
-          purchasingPowerLoss
+          riskReason: finalReason,
+          purchasingPowerLoss,
+          maxJobSearchMonths,
+          bankruptcyDate: bankruptcyDateStr || null
       }
   };
 };

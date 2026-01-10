@@ -14,7 +14,8 @@ export const SummaryCard = ({
     subtext, 
     color = 'blue',
     icon: Icon,
-    className = ''
+    className = '',
+    badge
 }: { 
     label: string; 
     value: string; 
@@ -22,6 +23,7 @@ export const SummaryCard = ({
     color?: 'blue'|'green'|'red'|'amber';
     icon?: LucideIcon;
     className?: string;
+    badge?: React.ReactNode;
 }) => {
     const styles = {
         blue: { text: 'text-blue-600', bg: 'bg-blue-50', icon: 'text-blue-500' },
@@ -34,18 +36,21 @@ export const SummaryCard = ({
 
     return (
         <div className={`bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-col transition-all hover:shadow-md ${className}`}>
-            <div className="flex justify-between items-start">
-                <div>
-                    <span className="text-slate-500 text-xs font-medium uppercase tracking-wide">{label}</span>
-                    <div className={`text-2xl font-bold mt-1 ${style.text}`}>{value}</div>
+            <div className="flex justify-between items-start mb-1">
+                <div className="flex flex-col">
+                     <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-slate-500 text-xs font-medium uppercase tracking-wide">{label}</span>
+                        {badge}
+                     </div>
+                     <div className={`text-2xl font-bold ${style.text}`}>{value}</div>
                 </div>
                 {Icon && (
-                    <div className={`p-2.5 rounded-xl ${style.bg} ${style.icon}`}>
+                    <div className={`p-2.5 rounded-xl ${style.bg} ${style.icon} shrink-0`}>
                         <Icon size={20} strokeWidth={2.5} />
                     </div>
                 )}
             </div>
-            {subtext && <span className="text-slate-400 text-xs mt-2 font-medium">{subtext}</span>}
+            {subtext && <span className="text-slate-400 text-xs font-medium">{subtext}</span>}
         </div>
     );
 };

@@ -9,6 +9,11 @@ export interface MacroConfig {
   inflationRate: number; // Global annual inflation rate %
 }
 
+export interface RiskSettings {
+  jobLossDate: string; // ISO Date (YYYY-MM-DD)
+  notificationDate: string; // ISO Date (YYYY-MM-DD) - When you find out
+}
+
 export interface Expense {
   id: string;
   name: string;
@@ -119,9 +124,13 @@ export interface SimulationResult {
     totalInterestPaid: number;
     totalInterestSaved: number;
     liquidityRunwayMonths: number;
-    lowestLiquidityMonths: number; // New
+    lowestLiquidityMonths: number; 
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-    riskReason: string; // New
-    purchasingPowerLoss: number; // % of value lost due to inflation
+    riskReason: string; 
+    purchasingPowerLoss: number; 
+    
+    // New specific risk metrics
+    maxJobSearchMonths: number | null; // Null if no job loss or never bankrupt
+    bankruptcyDate: string | null;
   };
 }
