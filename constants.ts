@@ -1,3 +1,5 @@
+import { Expense } from './types';
+
 export const APP_NAME = "FinSim";
 
 // Deprecated: INTEREST_SCHEDULE is now part of MortgageConfig.rates
@@ -6,7 +8,7 @@ export const DEPOSITO_RATE = 6.0; // 6% annual
 export const BPJS_GROWTH_RATE = 5.7 / 12; // Monthly growth
 
 // Default Initial Data
-export const DEFAULT_EXPENSES = [
+export const DEFAULT_EXPENSES: Expense[] = [
   { id: '1', name: 'Groceries', category: 'MANDATORY', amount: 4000000, annualIncreasePercent: 4 },
   { id: '2', name: 'Utilities', category: 'MANDATORY', amount: 1500000, annualIncreasePercent: 3 },
   { id: '3', name: 'Transport', category: 'MANDATORY', amount: 1000000, annualIncreasePercent: 3 },
