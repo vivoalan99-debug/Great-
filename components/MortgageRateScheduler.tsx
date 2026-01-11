@@ -1,7 +1,7 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
 import { Plus, Trash2, ArrowRight } from 'lucide-react';
-import { InterestRateTier } from '../types';
+import { InterestRateTier } from '../features/simulation/domain/types';
 
 export const MortgageRateScheduler = () => {
   const { mortgage, setMortgage } = useStore();

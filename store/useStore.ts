@@ -1,7 +1,13 @@
 import { create } from 'zustand';
-import { Expense, IncomeConfig, MortgageConfig, ScenarioType, SimulationResult, MacroConfig, RiskSettings } from '../types';
+import { Expense, IncomeConfig, MortgageConfig, ScenarioType, SimulationResult, MacroConfig, RiskSettings } from '../features/simulation/domain/types';
 import { DEFAULT_EXPENSES, DEFAULT_INCOME, DEFAULT_MORTGAGE, DEFAULT_MACRO, DEFAULT_RISK_SETTINGS } from '../constants';
-import { runSimulation } from '../services/engine';
+import { SimulationService } from '../features/simulation/application/simulation.service';
+import { LocalStorageFinancialRepository } from '../features/simulation/infrastructure/local-storage.financial.repository';
+
+// Dependency Injection Root
+// To switch to API, simply change 'LocalStorageFinancialRepository' to 'ApiFinancialRepository'
+const repository = new LocalStorageFinancialRepository();
+const service = new SimulationService(repository);
 
 interface AppState {
   expenses: Expense[];
@@ -11,15 +17,20 @@ interface AppState {
   scenario: ScenarioType;
   riskSettings: RiskSettings;
   simulationResult: SimulationResult | null;
+  
+  isInitialized: boolean;
+  isLoading: boolean;
 
-  setExpenses: (expenses: Expense[]) => void;
-  updateExpense: (id: string, updates: Partial<Expense>) => void;
-  setIncome: (income: IncomeConfig) => void;
-  setMortgage: (mortgage: MortgageConfig) => void;
-  setMacro: (macro: MacroConfig) => void;
-  setScenario: (scenario: ScenarioType) => void;
-  setRiskSettings: (settings: RiskSettings) => void;
-  run: () => void;
+  // Async Actions
+  loadInitialData: () => Promise<void>;
+  setExpenses: (expenses: Expense[]) => Promise<void>;
+  updateExpense: (id: string, updates: Partial<Expense>) => Promise<void>;
+  setIncome: (income: IncomeConfig) => Promise<void>;
+  setMortgage: (mortgage: MortgageConfig) => Promise<void>;
+  setMacro: (macro: MacroConfig) => Promise<void>;
+  setScenario: (scenario: ScenarioType) => Promise<void>;
+  setRiskSettings: (settings: RiskSettings) => Promise<void>;
+  run: () => Promise<void>;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -30,47 +41,83 @@ export const useStore = create<AppState>((set, get) => ({
   scenario: ScenarioType.NORMAL,
   riskSettings: DEFAULT_RISK_SETTINGS,
   simulationResult: null,
+  isInitialized: false,
+  isLoading: false,
 
-  setExpenses: (expenses) => {
-    set({ expenses });
-    get().run();
+  loadInitialData: async () => {
+      set({ isLoading: true });
+      try {
+          // Parallel fetch for speed
+          const [expenses, income, mortgage, macro, scenario, riskSettings] = await Promise.all([
+              repository.getExpenses(),
+              repository.getIncome(),
+              repository.getMortgage(),
+              repository.getMacro(),
+              repository.getScenario(),
+              repository.getRiskSettings()
+          ]);
+          
+          set({ 
+              expenses, income, mortgage, macro, scenario, riskSettings,
+              isInitialized: true 
+          });
+          
+          // Run first simulation
+          await get().run();
+      } catch (err) {
+          console.error("Failed to load initial data", err);
+      } finally {
+          set({ isLoading: false });
+      }
+  },
+
+  setExpenses: async (expenses) => {
+    set({ expenses, isLoading: true });
+    const result = await service.updateExpenses(expenses);
+    set({ simulationResult: result, isLoading: false });
   },
   
-  updateExpense: (id, updates) => {
-    set((state) => ({
-        expenses: state.expenses.map(e => e.id === id ? { ...e, ...updates } : e)
-    }));
-    get().run();
+  updateExpense: async (id, updates) => {
+    const currentExpenses = get().expenses;
+    const newExpenses = currentExpenses.map(e => e.id === id ? { ...e, ...updates } : e);
+    await get().setExpenses(newExpenses);
   },
 
-  setIncome: (income) => {
-    set({ income });
-    get().run();
+  setIncome: async (income) => {
+    set({ income, isLoading: true });
+    const result = await service.updateIncome(income);
+    set({ simulationResult: result, isLoading: false });
   },
 
-  setMortgage: (mortgage) => {
-    set({ mortgage });
-    get().run();
+  setMortgage: async (mortgage) => {
+    set({ mortgage, isLoading: true });
+    const result = await service.updateMortgage(mortgage);
+    set({ simulationResult: result, isLoading: false });
   },
 
-  setMacro: (macro) => {
-    set({ macro });
-    get().run();
+  setMacro: async (macro) => {
+    set({ macro, isLoading: true });
+    const result = await service.updateMacro(macro);
+    set({ simulationResult: result, isLoading: false });
   },
 
-  setScenario: (scenario) => {
-    set({ scenario });
-    get().run();
+  setScenario: async (scenario) => {
+    set({ scenario, isLoading: true });
+    const result = await service.updateScenario(scenario);
+    set({ simulationResult: result, isLoading: false });
   },
 
-  setRiskSettings: (riskSettings) => {
-    set({ riskSettings });
-    get().run();
+  setRiskSettings: async (riskSettings) => {
+    set({ riskSettings, isLoading: true });
+    const result = await service.updateRiskSettings(riskSettings);
+    set({ simulationResult: result, isLoading: false });
   },
 
-  run: () => {
-    const { expenses, income, mortgage, scenario, macro, riskSettings } = get();
-    const result = runSimulation(expenses, income, mortgage, macro, scenario, riskSettings);
-    set({ simulationResult: result });
+  run: async () => {
+    // With API integration, we don't recalculate locally in the store.
+    // We ask the service to get us the latest result.
+    set({ isLoading: true });
+    const result = await service.runSimulation();
+    set({ simulationResult: result, isLoading: false });
   }
 }));

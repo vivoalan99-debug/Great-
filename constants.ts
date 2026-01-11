@@ -1,8 +1,6 @@
-import { Expense } from './types';
+import { Expense } from './features/simulation/domain/types';
 
 export const APP_NAME = "FinSim";
-
-// Deprecated: INTEREST_SCHEDULE is now part of MortgageConfig.rates
 
 export const DEPOSITO_RATE = 6.0; // 6% annual
 export const BPJS_GROWTH_RATE = 5.7 / 12; // Monthly growth
@@ -38,8 +36,6 @@ export const DEFAULT_MORTGAGE = {
   ]
 };
 
-// Default Risk Dates (e.g., Job loss in month 18, Notification in month 15)
-// We calculate relative to a fixed start date for the default to work
 export const DEFAULT_RISK_SETTINGS = {
   jobLossDate: '2027-06-01', // Approx 1.5 years from start
   notificationDate: '2027-03-01' // 3 months notice

@@ -6,12 +6,12 @@ export enum ScenarioType {
 }
 
 export interface MacroConfig {
-  inflationRate: number; // Global annual inflation rate %
+  inflationRate: number;
 }
 
 export interface RiskSettings {
-  jobLossDate: string; // ISO Date (YYYY-MM-DD)
-  notificationDate: string; // ISO Date (YYYY-MM-DD) - When you find out
+  jobLossDate: string;
+  notificationDate: string;
 }
 
 export interface Expense {
@@ -19,87 +19,62 @@ export interface Expense {
   name: string;
   category: 'MANDATORY' | 'DISCRETIONARY';
   amount: number;
-  annualIncreasePercent: number; // Treated as specific item inflation or spread
+  annualIncreasePercent: number;
 }
 
 export interface IncomeConfig {
   baseSalary: number;
   annualIncreasePercent: number;
-  thrMonths: number[]; // e.g. [2] for March (0-indexed)
-  compensationMonths: number[]; // e.g. [3] for April
+  thrMonths: number[];
+  compensationMonths: number[];
   bpjsInitialBalance: number;
 }
 
 export interface InterestRateTier {
   id: string;
-  startMonth: number; // 1-based (e.g. 1)
-  endMonth: number;   // 1-based (e.g. 24)
-  rate: number;       // Percentage (e.g. 2.68)
+  startMonth: number;
+  endMonth: number;
+  rate: number;
 }
 
 export interface MortgageConfig {
   principal: number;
-  startDate: string; // ISO Date
+  startDate: string;
   tenureYears: number;
-  penaltyPercent: number; // e.g. 1 for 1%
-  extraPaymentMinMultiple: number; // 6x rule
+  penaltyPercent: number;
+  extraPaymentMinMultiple: number;
   useDeposito: boolean;
-  rates: InterestRateTier[]; // Dynamic schedule
-}
-
-export interface SimulationState {
-  currentMonth: number; // 0 to TotalMonths
-  cash: number;
-  bufferFund: number;
-  emergencyFund: number;
-  extraPaymentBucket: number;
-  depositoBalance: number;
-  
-  mortgagePrincipal: number;
-  mortgageInstallment: number;
-  mortgageTermRemaining: number;
-  
-  isEmployed: boolean;
-  bpjsBalance: number;
+  rates: InterestRateTier[];
 }
 
 export interface MonthLog {
   monthIndex: number;
   dateStr: string;
   year: number;
-  
   incomeBase: number;
-  incomeBonus: number; // THR/Compensation
+  incomeBonus: number;
   totalIncome: number;
-  
   expensesMandatory: number;
   expensesDiscretionary: number;
   totalExpenses: number;
-  
   mortgagePaid: number;
   mortgageInterest: number;
   mortgagePrincipalPaid: number;
-  mortgageBalance: number; // End of month balance
+  mortgageBalance: number;
   mortgageRate: number;
-  
-  // New fields for Detailed PDF Export
   principalStart: number;
   principalAfterRegular: number;
   extraPaymentMade: number;
+  installmentBaseline: number;
   installmentCurrent: number;
   installmentNext: number;
-
   netFlow: number;
-  
   bufferBalance: number;
   emergencyBalance: number;
   extraPaymentBucket: number;
   depositoBalance: number;
-  
   events: string[];
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-
-  // New fields for Deposito tracking
   depositoInterestEarned: number;
   cumulativeDepositoInterest: number;
 }
@@ -112,6 +87,22 @@ export interface YearLog {
   installmentBefore: number;
   installmentAfter: number;
   principalReduced: number;
+}
+
+// NEW: Structured data for the Comparison/Impact Analysis
+export interface StrategySnapshot {
+    totalAssetInterest: number;
+    totalMortgageInterestPaid: number;
+    payoffDateStr: string | null;
+    payoffMonthIndex: number;
+}
+
+export interface ImpactAnalysis {
+    cashStrategy: StrategySnapshot;
+    depositoStrategy: StrategySnapshot;
+    netBenefit: number;
+    monthsSaved: number;
+    isPayoffAchievedFaster: boolean;
 }
 
 export interface SimulationResult {
@@ -128,9 +119,9 @@ export interface SimulationResult {
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
     riskReason: string; 
     purchasingPowerLoss: number; 
-    
-    // New specific risk metrics
-    maxJobSearchMonths: number | null; // Null if no job loss or never bankrupt
+    maxJobSearchMonths: number | null;
     bankruptcyDate: string | null;
   };
+  // Pre-calculated comparison data
+  impactAnalysis: ImpactAnalysis;
 }

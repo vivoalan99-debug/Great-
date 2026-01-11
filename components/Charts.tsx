@@ -1,12 +1,12 @@
 import React from 'react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, BarChart, Bar } from 'recharts';
-import { MonthLog } from '../types';
-import { formatMoney } from '../services/mathUtils';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
+import { MonthLog } from '../features/simulation/domain/types';
+import { formatMoney } from '../shared/utils/mathUtils';
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-white p-3 border border-slate-200 shadow-lg rounded-lg text-xs">
+      <div className="bg-white p-3 border border-slate-200 shadow-lg rounded-lg text-xs z-50">
         <p className="font-bold mb-2">{label}</p>
         {payload.map((entry: any, index: number) => (
           <div key={index} className="flex items-center gap-2 mb-1">

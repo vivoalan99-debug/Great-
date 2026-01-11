@@ -1,120 +1,72 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useStore } from '../store/useStore';
-import { runSimulation } from '../services/engine';
-import { formatMoney } from '../services/mathUtils';
+import { formatMoney } from '../shared/utils/mathUtils';
 import { Card } from './ui/Card';
 import { TrendingUp, Wallet, Landmark, CheckCircle2 } from 'lucide-react';
 
 export const DepositoImpactAnalysis = () => {
-    const { expenses, income, mortgage, macro, scenario, riskSettings } = useStore();
+    const { simulationResult } = useStore();
 
-    const comparison = useMemo(() => {
-        // 1. Scenario Without Deposito (Idle Cash)
-        const simCash = runSimulation(
-            expenses, income, 
-            { ...mortgage, useDeposito: false }, 
-            macro, scenario,
-            riskSettings
-        );
+    if (!simulationResult) return null;
+    const { impactAnalysis } = simulationResult;
+    const { cashStrategy, depositoStrategy, netBenefit, monthsSaved, isPayoffAchievedFaster } = impactAnalysis;
 
-        // 2. Scenario With Deposito (High Yield)
-        const simDeposito = runSimulation(
-            expenses, income, 
-            { ...mortgage, useDeposito: true }, 
-            macro, scenario,
-            riskSettings
-        );
-
-        const getStats = (sim: any) => {
-            const lastLog = sim.logs[sim.logs.length - 1];
-            const payoffDateStr = sim.summary.mortgagePayoffDate;
-            let payoffDisplay = "Not Paid";
-            let payoffSort = 99999;
-
-            if (payoffDateStr) {
-                const date = new Date(payoffDateStr);
-                payoffDisplay = date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-                payoffSort = date.getFullYear() * 12 + date.getMonth();
-            }
-
-            return {
-                totalAssetInterest: lastLog.cumulativeDepositoInterest,
-                totalMortgageInterestPaid: sim.summary.totalInterestPaid,
-                payoffDisplay,
-                payoffSort,
-                logs: sim.logs
-            };
-        };
-
-        return {
-            cash: getStats(simCash),
-            deposito: getStats(simDeposito)
-        };
-    }, [expenses, income, mortgage, macro, scenario, riskSettings]);
-
-    const { cash, deposito } = comparison;
-    
-    // Deltas
-    const assetInterestDelta = deposito.totalAssetInterest - cash.totalAssetInterest;
-    const mortgageInterestDelta = cash.totalMortgageInterestPaid - deposito.totalMortgageInterestPaid; // Positive if Depo saves money
-    const netBenefit = assetInterestDelta + mortgageInterestDelta;
-    
-    // Avoid calculating months saved if the baseline never pays off (infinite).
-    const monthsSaved = (cash.payoffSort === 99999) ? 0 : Math.max(0, cash.payoffSort - deposito.payoffSort);
-    const achievedPayoff = cash.payoffSort === 99999 && deposito.payoffSort < 99999;
+    const formatDate = (dateStr: string | null) => {
+        if (!dateStr) return "Not Paid";
+        return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    };
 
     const StatRow = ({ label, valCash, valDepo, type = 'neutral', isDate = false }: any) => {
         const isBetter = type === 'inverse' ? valDepo < valCash : valDepo > valCash;
         const isEqual = valDepo === valCash;
         
-        let diffVal = 0;
-        if (!isDate) {
-             diffVal = type === 'inverse' ? valCash - valDepo : valDepo - valCash;
+        // Handle Date comparison
+        if (isDate) {
+            return (
+                <div className="flex flex-col md:grid md:grid-cols-12 md:gap-4 py-4 border-b border-slate-50 last:border-0 text-sm">
+                    <div className="md:col-span-4 text-slate-500 font-medium mb-2 md:mb-0 flex items-center">{label}</div>
+                    <div className="md:col-span-4 flex md:block justify-between items-center md:text-right">
+                         <span className="md:hidden text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Wallet size={10} /> Cash</span>
+                         <div className="font-mono text-slate-600 whitespace-nowrap text-base">{formatDate(valCash as string)}</div>
+                    </div>
+                    <div className="md:col-span-4 flex md:flex-col justify-between items-center md:items-end mt-1 md:mt-0">
+                         <span className="md:hidden text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1"><Landmark size={10} /> Deposito</span>
+                         <div className="flex flex-col items-end">
+                            <div className={`font-mono font-bold whitespace-nowrap text-base ${isEqual ? 'text-slate-600' : isBetter ? 'text-emerald-600' : 'text-slate-600'}`}>
+                                {formatDate(valDepo as string)}
+                            </div>
+                            {isPayoffAchievedFaster && (
+                                <div className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full mt-1 whitespace-nowrap">
+                                    {monthsSaved > 0 ? `${monthsSaved} Mo Faster` : 'Payoff Achieved'}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
         }
+
+        // Handle Number comparison
+        const vCash = valCash as number;
+        const vDepo = valDepo as number;
+        let diffVal = type === 'inverse' ? vCash - vDepo : vDepo - vCash;
 
         return (
             <div className="flex flex-col md:grid md:grid-cols-12 md:gap-4 py-4 border-b border-slate-50 last:border-0 text-sm">
-                {/* Label Column */}
-                <div className="md:col-span-4 text-slate-500 font-medium mb-2 md:mb-0 flex items-center">
-                    {label}
-                </div>
-                
-                {/* Cash Value Column */}
+                <div className="md:col-span-4 text-slate-500 font-medium mb-2 md:mb-0 flex items-center">{label}</div>
                 <div className="md:col-span-4 flex md:block justify-between items-center md:text-right">
-                     <span className="md:hidden text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                        <Wallet size={10} /> Cash
-                     </span>
-                     <div className="font-mono text-slate-600 whitespace-nowrap text-base">
-                        {isDate ? valCash : formatMoney(valCash)}
-                     </div>
+                     <span className="md:hidden text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Wallet size={10} /> Cash</span>
+                     <div className="font-mono text-slate-600 whitespace-nowrap text-base">{formatMoney(vCash)}</div>
                 </div>
-
-                {/* Deposito Value Column */}
                 <div className="md:col-span-4 flex md:flex-col justify-between items-center md:items-end mt-1 md:mt-0">
-                     <span className="md:hidden text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1">
-                        <Landmark size={10} /> Deposito
-                     </span>
+                     <span className="md:hidden text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1"><Landmark size={10} /> Deposito</span>
                      <div className="flex flex-col items-end">
-                        <div className={`font-mono font-bold whitespace-nowrap text-base ${
-                            isEqual ? 'text-slate-600' : isBetter ? 'text-emerald-600' : 'text-slate-600'
-                        }`}>
-                            {isDate ? valDepo : formatMoney(valDepo)}
+                        <div className={`font-mono font-bold whitespace-nowrap text-base ${isEqual ? 'text-slate-600' : isBetter ? 'text-emerald-600' : 'text-slate-600'}`}>
+                            {formatMoney(vDepo)}
                         </div>
-                        
-                        {/* Stacked Delta Value - BELOW the main value */}
-                        {!isEqual && !isDate && (
+                        {!isEqual && (
                             <div className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full mt-1 whitespace-nowrap">
                                 +{formatMoney(diffVal)}
-                            </div>
-                        )}
-                        {isDate && monthsSaved > 0 && (
-                            <div className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full mt-1 whitespace-nowrap">
-                                {monthsSaved} Mo Faster
-                            </div>
-                        )}
-                         {isDate && achievedPayoff && (
-                            <div className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full mt-1 whitespace-nowrap">
-                                Payoff Achieved
                             </div>
                         )}
                     </div>
@@ -127,7 +79,6 @@ export const DepositoImpactAnalysis = () => {
         <Card title="Strategy Comparison: Impact of Deposito (6%)">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-6">
                 <div className="lg:col-span-2">
-                    {/* Desktop Header */}
                     <div className="hidden md:grid grid-cols-12 gap-4 pb-3 border-b border-slate-200">
                          <div className="col-span-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Metric</div>
                          <div className="col-span-4 text-right text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-end gap-1">
@@ -139,9 +90,9 @@ export const DepositoImpactAnalysis = () => {
                     </div>
                     
                     <div className="space-y-1">
-                        <StatRow label="Accumulated Interest Earned" valCash={cash.totalAssetInterest} valDepo={deposito.totalAssetInterest} />
-                        <StatRow label="Mortgage Interest Paid" valCash={cash.totalMortgageInterestPaid} valDepo={deposito.totalMortgageInterestPaid} type="inverse" />
-                        <StatRow label="Projected Payoff Date" valCash={cash.payoffDisplay} valDepo={deposito.payoffDisplay} isDate={true} />
+                        <StatRow label="Accumulated Interest Earned" valCash={cashStrategy.totalAssetInterest} valDepo={depositoStrategy.totalAssetInterest} />
+                        <StatRow label="Mortgage Interest Paid" valCash={cashStrategy.totalMortgageInterestPaid} valDepo={depositoStrategy.totalMortgageInterestPaid} type="inverse" />
+                        <StatRow label="Projected Payoff Date" valCash={cashStrategy.payoffDateStr} valDepo={depositoStrategy.payoffDateStr} isDate={true} />
                     </div>
                 </div>
 
@@ -154,10 +105,10 @@ export const DepositoImpactAnalysis = () => {
                     <p className="text-xs text-emerald-700/80 leading-relaxed px-2">
                         By using the high-yield strategy, you generate additional wealth of <strong>{formatMoney(netBenefit)}</strong> over the simulation period.
                     </p>
-                    {(monthsSaved > 0 || achievedPayoff) && (
+                    {isPayoffAchievedFaster && (
                         <div className="mt-4 flex items-center gap-2 px-4 py-1.5 bg-white/60 rounded-full text-emerald-800 text-xs font-bold border border-emerald-100 shadow-sm">
                             <CheckCircle2 size={14} className="text-emerald-600" />
-                            {achievedPayoff ? "Achieved Payoff" : `Mortgage Free ${monthsSaved} Months Sooner`}
+                            {monthsSaved > 0 ? `Mortgage Free ${monthsSaved} Months Sooner` : "Payoff Achieved"}
                         </div>
                     )}
                 </div>

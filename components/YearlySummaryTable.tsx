@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
-import { formatMoney } from '../services/mathUtils';
+import { formatMoney } from '../shared/utils/mathUtils';
 import { Card } from './ui/Card';
 
 export const YearlySummaryTable = () => {

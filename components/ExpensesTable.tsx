@@ -1,14 +1,26 @@
 import React from 'react';
 import { useStore } from '../store/useStore';
-import { formatMoney } from '../services/mathUtils';
+import { formatMoney } from '../shared/utils/mathUtils';
 import { Trash2, Plus, ArrowUpRight } from 'lucide-react';
+import { DebouncedInput } from './ui/DebouncedInput';
 
 export const ExpensesTable: React.FC = () => {
   const { expenses, setExpenses, updateExpense, macro } = useStore();
 
-  const handleAmountChange = (id: string, val: string) => {
-    const num = parseInt(val.replace(/\D/g, ''), 10) || 0;
-    updateExpense(id, { amount: num });
+  // Helper for currency formatted inputs (visual only, passes number back)
+  const CurrencyInput = ({ value, onChange, className }: { value: number, onChange: (val: number) => void, className: string }) => {
+     // Local formatting logic handled inside DebouncedInput via type='text' if we wanted masking,
+     // but for simplicity we keep it raw number or standard input here.
+     // To keep it simple and robust:
+     return (
+         <DebouncedInput 
+            type="text" // Use text to allow formatting if needed later, but sending number back
+            formatType="number"
+            className={className}
+            value={value}
+            onChange={(val) => onChange(val as number)}
+         />
+     );
   };
 
   const addExpense = () => {
@@ -49,11 +61,12 @@ export const ExpensesTable: React.FC = () => {
             return (
             <tr key={item.id} className="group transition-colors hover:bg-slate-50/80">
               <td className="px-2 py-2">
-                <input 
+                <DebouncedInput
+                  type="text"
                   className="bg-transparent font-medium text-slate-700 w-full focus:outline-none focus:text-blue-600 placeholder:text-slate-300"
                   value={item.name}
                   placeholder="Expense Name"
-                  onChange={(e) => updateExpense(item.id, { name: e.target.value })}
+                  onChange={(val) => updateExpense(item.id, { name: val as string })}
                 />
               </td>
               <td className="px-2 py-2 hidden sm:table-cell">
@@ -69,21 +82,22 @@ export const ExpensesTable: React.FC = () => {
               <td className="px-2 py-2 text-right">
                 <div className="relative">
                     <span className="absolute left-0 top-1/2 -translate-y-1/2 text-slate-300 text-xs pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">Rp</span>
-                    <input 
-                    className="bg-transparent text-right w-full focus:outline-none focus:text-blue-600 font-mono text-slate-700 font-medium"
-                    value={item.amount.toLocaleString('id-ID')}
-                    onChange={(e) => handleAmountChange(item.id, e.target.value)}
+                    <CurrencyInput 
+                        className="bg-transparent text-right w-full focus:outline-none focus:text-blue-600 font-mono text-slate-700 font-medium"
+                        value={item.amount}
+                        onChange={(val) => updateExpense(item.id, { amount: val })}
                     />
                 </div>
               </td>
               <td className="px-2 py-2 text-right">
                 <div className="flex items-center justify-end gap-1">
                     {isOverridden && <ArrowUpRight size={10} className="text-amber-500" />}
-                    <input 
-                    type="number"
-                    className={`bg-transparent text-right w-10 focus:outline-none focus:border-b focus:border-blue-500 font-mono text-xs ${isOverridden ? 'text-amber-600 font-bold' : 'text-slate-400'}`}
-                    value={item.annualIncreasePercent}
-                    onChange={(e) => updateExpense(item.id, { annualIncreasePercent: parseFloat(e.target.value) })}
+                    <DebouncedInput
+                        type="number"
+                        formatType="number"
+                        className={`bg-transparent text-right w-10 focus:outline-none focus:border-b focus:border-blue-500 font-mono text-xs ${isOverridden ? 'text-amber-600 font-bold' : 'text-slate-400'}`}
+                        value={item.annualIncreasePercent}
+                        onChange={(val) => updateExpense(item.id, { annualIncreasePercent: val as number })}
                     />
                 </div>
               </td>
